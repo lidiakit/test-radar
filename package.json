@@ -1,0 +1,71 @@
+{
+  "name": "test-radar",
+  "displayName": "Test Radar — CI test results in your editor",
+  "description": "See which tests failed on your current branch in GitHub Actions, right in your editor — click a failure to jump to the test. Works with Jest, Vitest, Playwright, and Detox.",
+  "version": "0.0.1",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.118.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "test-radar.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "test-radar.signIn",
+        "title": "Test Radar: Sign in to GitHub"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "testRadar",
+          "title": "Test Radar",
+          "icon": "media/radar.svg"
+        }
+      ]
+    },
+    "views": {
+      "testRadar": [
+        {
+          "id": "testRadar.results",
+          "name": "CI Test Results",
+          "icon": "media/radar.svg"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.118.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.39.3",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  }
+}
