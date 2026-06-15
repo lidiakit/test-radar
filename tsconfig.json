@@ -12,5 +12,9 @@
 		// "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */
 		// "noFallthroughCasesInSwitch": true, /* Report errors for fallthrough cases in switch statement. */
 		// "noUnusedParameters": true,  /* Report errors on unused parameters. */
-	}
+	},
+	// Vitest transpiles and runs the unit tests itself (see vitest.config.ts), so
+	// keep them — and the Vitest config — out of the extension's tsc type-check,
+	// which targets CommonJS and can't import Vitest's pure-ESM types.
+	"exclude": ["node_modules", "vitest.config.ts", "src/**/*.unit.test.ts"]
 }
