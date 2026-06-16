@@ -29,6 +29,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const git = await getGitAPI();
   const provider = new TestRadarProvider(git);
   context.subscriptions.push(
+    provider, // disposes the auto-refresh timer on deactivate
     vscode.window.registerTreeDataProvider("testRadar.results", provider),
   );
 
