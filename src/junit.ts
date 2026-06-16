@@ -21,6 +21,28 @@ export interface JunitReport {
   cases: TestCaseResult[];
 }
 
+export interface FileGroup {
+  file: string;
+  cases: TestCaseResult[];
+}
+
+// Groups cases by their source file (the `file` attribute, else `classname`),
+// preserving first-seen order of both files and cases within each file. Pure;
+// used to render failures grouped by file when they span several.
+export function groupByFile(cases: TestCaseResult[]): FileGroup[] {
+  const groups = new Map<string, TestCaseResult[]>();
+  for (const testCase of cases) {
+    const file = testCase.file ?? testCase.classname;
+    const existing = groups.get(file);
+    if (existing) {
+      existing.push(testCase);
+    } else {
+      groups.set(file, [testCase]);
+    }
+  }
+  return [...groups].map(([file, cases]) => ({ file, cases }));
+}
+
 // fast-xml-parser turns attributes into "@_"-prefixed keys and leaves element
 // text under "#text". We keep attribute values as strings (no coercion) so test
 // names like "adds 1 + 1" aren't mangled, and let entities (&gt; etc.) decode.

@@ -10,7 +10,7 @@ import {
   extractJunitXml,
   WorkflowRun,
 } from "./github";
-import { parseJunitXml, JunitReport, TestCaseResult } from "./junit";
+import { parseJunitXml, groupByFile, JunitReport, TestCaseResult } from "./junit";
 import { findTestLine } from "./stack";
 
 // The outcome of trying to load a run's test-results artifact. Kept separate
@@ -172,6 +172,9 @@ export class TestRadarProvider
     if (element instanceof RunItem) {
       return runChildren(element.report, element.rootUri);
     }
+    if (element instanceof FileGroupItem) {
+      return element.cases.map((c) => failureRow(c, element.rootUri));
+    }
     if (element) {
       return [];
     }
@@ -218,7 +221,11 @@ export class TestRadarProvider
 }
 
 // The run row. Expands to show failing tests when the parsed report has any.
+// The "run" contextValue + runUrl drive the inline "View run on GitHub" action.
 class RunItem extends vscode.TreeItem {
+  readonly contextValue = "run";
+  readonly runUrl: string;
+
   constructor(
     readonly run: WorkflowRun,
     readonly report: ReportState,
@@ -233,6 +240,7 @@ class RunItem extends vscode.TreeItem {
     this.iconPath = runIcon(run);
     this.description = summaryText(run, report);
     this.tooltip = `${run.name} — ${run.status}`;
+    this.runUrl = run.htmlUrl;
   }
 }
 
@@ -265,18 +273,37 @@ function summaryText(run: WorkflowRun, report: ReportState): string {
   return run.name;
 }
 
-// Children of a run row: one row per failing test, or a hint when the report
-// couldn't be loaded.
+// Children of a run row: the failing tests, or a hint when the report couldn't
+// be loaded. Failures in a single file are listed directly; when they span
+// several files, they're grouped under one collapsible row per file so a long
+// list stays scannable.
 function runChildren(report: ReportState, rootUri: vscode.Uri): vscode.TreeItem[] {
   if (report.kind === "ready") {
-    return report.report.cases
-      .filter((c) => c.status === "failed")
-      .map((c) => failureRow(c, rootUri));
+    const failures = report.report.cases.filter((c) => c.status === "failed");
+    const groups = groupByFile(failures);
+    if (groups.length > 1) {
+      return groups.map((g) => new FileGroupItem(g.file, g.cases, rootUri));
+    }
+    return failures.map((c) => failureRow(c, rootUri));
   }
   if (report.kind === "unavailable") {
     return [labelRow(`Test results unavailable — ${report.reason}`, "warning")];
   }
   return [];
+}
+
+// A per-file grouping row shown when failures span multiple files. Expands to
+// the failing tests in that file.
+class FileGroupItem extends vscode.TreeItem {
+  constructor(
+    readonly file: string,
+    readonly cases: TestCaseResult[],
+    readonly rootUri: vscode.Uri,
+  ) {
+    super(file, vscode.TreeItemCollapsibleState.Expanded);
+    this.iconPath = new vscode.ThemeIcon("file");
+    this.description = `${cases.length} failed`;
+  }
 }
 
 function failureRow(

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseJunitXml } from "./junit";
+import { parseJunitXml, groupByFile, type TestCaseResult } from "./junit";
+
+function failed(name: string, file: string): TestCaseResult {
+  return { name, classname: file, file, status: "failed" };
+}
 
 describe("parseJunitXml", () => {
   it("parses an all-passing suite", () => {
@@ -133,5 +137,37 @@ describe("parseJunitXml", () => {
     </testsuite></testsuites>`;
 
     expect(parseJunitXml(xml).cases[0].file).toBeUndefined();
+  });
+});
+
+describe("groupByFile", () => {
+  it("groups cases by file, preserving file and case order", () => {
+    const cases = [
+      failed("a1", "src/a.test.ts"),
+      failed("b1", "src/b.test.ts"),
+      failed("a2", "src/a.test.ts"),
+    ];
+    const groups = groupByFile(cases);
+    expect(groups.map((g) => g.file)).toEqual(["src/a.test.ts", "src/b.test.ts"]);
+    expect(groups[0].cases.map((c) => c.name)).toEqual(["a1", "a2"]);
+    expect(groups[1].cases.map((c) => c.name)).toEqual(["b1"]);
+  });
+
+  it("falls back to classname when there is no file attribute", () => {
+    const cases = [{ name: "x", classname: "suite/x", status: "failed" as const }];
+    expect(groupByFile(cases).map((g) => g.file)).toEqual(["suite/x"]);
+  });
+
+  it("returns a single group when every case shares a file", () => {
+    const groups = groupByFile([
+      failed("a1", "src/a.test.ts"),
+      failed("a2", "src/a.test.ts"),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].cases).toHaveLength(2);
+  });
+
+  it("returns an empty array for no cases", () => {
+    expect(groupByFile([])).toEqual([]);
   });
 });

@@ -5,11 +5,6 @@ import { signInToGitHub } from "./auth";
 
 export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
-    vscode.commands.registerCommand("test-radar.helloWorld", () => {
-      vscode.window.showInformationMessage(
-        "Hello World from Test Radar — CI test results in your editor!",
-      );
-    }),
     vscode.commands.registerCommand("test-radar.signIn", async () => {
       try {
         const session = await signInToGitHub();
@@ -33,6 +28,15 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider("testRadar.results", provider),
     vscode.commands.registerCommand("test-radar.refresh", () =>
       provider.refresh(),
+    ),
+    // Invoked from the run row's inline action; the tree item carries runUrl.
+    vscode.commands.registerCommand(
+      "test-radar.openRun",
+      (item?: { runUrl?: string }) => {
+        if (item?.runUrl) {
+          void vscode.env.openExternal(vscode.Uri.parse(item.runUrl));
+        }
+      },
     ),
   );
 
