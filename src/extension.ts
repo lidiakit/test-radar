@@ -5,11 +5,6 @@ import { signInToGitHub } from "./auth";
 
 export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
-    vscode.commands.registerCommand("test-radar.helloWorld", () => {
-      vscode.window.showInformationMessage(
-        "Hello World from Test Radar — CI test results in your editor!",
-      );
-    }),
     vscode.commands.registerCommand("test-radar.signIn", async () => {
       try {
         const session = await signInToGitHub();

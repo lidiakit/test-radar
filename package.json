@@ -15,10 +15,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "test-radar.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "test-radar.signIn",
         "title": "Test Radar: Sign in to GitHub"
       },
