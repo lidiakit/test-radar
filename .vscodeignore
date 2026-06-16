@@ -15,6 +15,7 @@ vsc-extension-quickstart.md
 **/eslint.config.mjs
 **/*.map
 **/*.ts
+**/*.mov
 **/.vscode-test.*
 media/**
 !media/icon.png
