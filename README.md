@@ -1,71 +1,71 @@
-# test-radar README
+# Test Radar — CI test results in your editor
 
-This is the README for your extension "test-radar". After writing up a brief description, we recommend including the following sections.
+**See which tests failed on your current branch in GitHub Actions, right in your editor — click a failure to jump straight to the test.** Works with Jest, Vitest, Playwright, Detox, and anything else that produces JUnit XML.
+
+![Test Radar showing failing tests grouped by file, with click-to-jump](https://raw.githubusercontent.com/lidiakit/test-radar/main/media/demo.gif)
+
+No more flipping to the browser to read CI logs. Test Radar watches the branch you're on, finds its latest GitHub Actions run, and shows the test results in a sidebar — green when you're good, and a tidy, clickable list of failures when you're not.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **Branch-aware.** Automatically tracks your current Git branch and its latest GitHub Actions run.
+- **Real test results, not just pass/fail.** Downloads and parses the run's JUnit report, so you see individual failing tests.
+- **Click to jump.** Click a failing test to open its file at the exact failing line, parsed from the stack trace.
+- **Grouped by file.** When failures span several files, they're grouped per file so a long list stays scannable.
+- **A friendly green state.** When everything passes, you get a clear "All N tests passed 🎉" — not a blank panel.
+- **Live updates.** Auto-refreshes while a run is queued or in progress, plus a manual refresh button.
+- **One click to the full run.** "View run on GitHub" opens the Actions page in your browser.
 
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+![All tests passing, and the in-progress state](https://raw.githubusercontent.com/lidiakit/test-radar/main/media/states.png)
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+Test Radar reads results that your CI **uploads as an artifact** — it doesn't run your tests. Two things need to be true:
 
-## Extension Settings
+1. **You're signed in to GitHub.** Run **"Test Radar: Sign in to GitHub"** from the Command Palette (or click the sign-in row in the view). This uses VS Code's built-in GitHub authentication.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+2. **Your CI uploads a JUnit report as an artifact named `test-results`.** Your test runner needs to emit a JUnit XML file, and your workflow needs to upload it under exactly that name. For example:
 
-For example:
+   ```yaml
+   - name: Run tests
+     run: npm test            # configured to write a JUnit file, e.g. test-results/junit.xml
 
-This extension contributes the following settings:
+   - name: Upload test results
+     if: always()             # upload even when tests fail
+     uses: actions/upload-artifact@v4
+     with:
+       name: test-results     # Test Radar looks for this exact name
+       path: test-results/junit.xml
+   ```
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+   Most runners produce JUnit XML with a small config:
+   - **Vitest** — `reporters: ['junit'], outputFile: 'test-results/junit.xml'`
+   - **Jest / Detox** — the [`jest-junit`](https://www.npmjs.com/package/jest-junit) reporter
+   - **Playwright** — `reporter: [['junit', { outputFile: 'test-results/junit.xml' }]]`
 
-## Known Issues
+   The `if: always()` matters — without it, a failing test run skips the upload and Test Radar has nothing to show.
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+## Getting started
 
-## Release Notes
+1. Install the extension and open a project hosted on GitHub.
+2. Open the **Test Radar** view from the activity bar (the radar icon).
+3. Sign in to GitHub when prompted.
+4. Push a branch with the CI workflow above. Once a run finishes, its results appear in the view — click any failure to jump to the test.
 
-Users appreciate release notes as you update your extension.
+## How it works
 
-### 1.0.0
+For the branch you're on, Test Radar asks the GitHub API for the latest workflow run, lists its artifacts, downloads the `test-results` ZIP, unzips it in memory, parses the JUnit XML, and renders it. Nothing is executed locally and no test code is run — it only reads what CI already produced.
 
-Initial release of ...
+## Extension settings
 
-### 1.0.1
+None yet. Test Radar works with zero configuration once your CI uploads the artifact.
 
-Fixed issue #.
+## Known limitations
 
-### 1.1.0
+- **GitHub Actions only** (for now). Other CI providers aren't supported yet.
+- The artifact must be named **`test-results`** and contain a `junit.xml`.
+- Works with the first repository in the window.
 
-Added features X, Y, and Z.
+## License
 
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+[MIT](LICENSE)
