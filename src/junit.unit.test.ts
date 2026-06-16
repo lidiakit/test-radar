@@ -17,11 +17,12 @@ describe("parseJunitXml", () => {
     expect(report.cases.map((c) => c.status)).toEqual(["passed", "passed"]);
   });
 
-  it("captures a failure's message from the message attribute", () => {
+  it("captures the failure body (summary + stack) over the attribute", () => {
     const xml = `<testsuites>
       <testsuite name="s">
         <testcase classname="src/a.test.ts" name="adds">
-          <failure message="expected 2 to be 3">AssertionError: at a.test.ts:5</failure>
+          <failure message="expected 2 to be 3">AssertionError: expected 2 to be 3
+ ❯ src/a.test.ts:5:11</failure>
         </testcase>
       </testsuite>
     </testsuites>`;
@@ -32,8 +33,9 @@ describe("parseJunitXml", () => {
       name: "adds",
       classname: "src/a.test.ts",
       status: "failed",
-      message: "expected 2 to be 3",
     });
+    // The body is preferred because it carries the stack frame we jump to.
+    expect(report.cases[0].message).toContain("src/a.test.ts:5:11");
   });
 
   it("treats an <error> child as a failure", () => {

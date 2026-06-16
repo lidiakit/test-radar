@@ -11,6 +11,7 @@ import {
   WorkflowRun,
 } from "./github";
 import { parseJunitXml, JunitReport, TestCaseResult } from "./junit";
+import { findTestLine } from "./stack";
 
 // The outcome of trying to load a run's test-results artifact. Kept separate
 // from the run itself so an expired/missing artifact still shows the run.
@@ -251,7 +252,6 @@ function failureRow(
     "error",
     new vscode.ThemeColor("testing.iconFailed"),
   );
-  item.description = testCase.classname;
   if (testCase.message) {
     const tooltip = new vscode.MarkdownString();
     tooltip.appendCodeblock(testCase.message);
@@ -262,11 +262,22 @@ function failureRow(
   // attribute; fall back to `classname`, which is the file path for Vitest.
   const path = testCase.file ?? testCase.classname;
   const uri = resolveTestUri(rootUri, path);
+  // Pin the exact failing line from the stack trace when we can find it.
+  const line = findTestLine(testCase.message, path);
+  item.description = line ? `${testCase.classname}:${line}` : testCase.classname;
   if (uri) {
+    const args: unknown[] = [uri];
+    if (line !== undefined) {
+      const pos = new vscode.Position(line - 1, 0);
+      const options: vscode.TextDocumentShowOptions = {
+        selection: new vscode.Range(pos, pos),
+      };
+      args.push(options);
+    }
     item.command = {
       command: "vscode.open",
       title: "Open Test File",
-      arguments: [uri],
+      arguments: args,
     };
   }
   return item;

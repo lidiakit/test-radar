@@ -40,7 +40,9 @@ function toArray<T>(value: T | T[] | undefined): T[] {
 
 // A <failure>/<error> may be a bare string ("<failure>boom</failure>"), an
 // object with a message attribute and/or text body, or self-closing. Prefer the
-// message attribute, fall back to the body, and treat empty as "no message".
+// body: reporters put the full detail there — the summary plus the stack trace
+// (which is what lets us jump to the failing line) — and fall back to the
+// shorter message attribute when there's no body. Empty means "no message".
 function failureMessage(node: unknown): string | undefined {
   if (node === undefined || node === null) {
     return undefined;
@@ -49,7 +51,7 @@ function failureMessage(node: unknown): string | undefined {
     return node || undefined;
   }
   const record = node as Record<string, unknown>;
-  const message = record["@_message"] ?? record["#text"];
+  const message = record["#text"] ?? record["@_message"];
   const text = message === undefined ? undefined : String(message);
   return text || undefined;
 }
