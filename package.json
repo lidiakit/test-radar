@@ -21,8 +21,23 @@
       {
         "command": "test-radar.signIn",
         "title": "Test Radar: Sign in to GitHub"
+      },
+      {
+        "command": "test-radar.refresh",
+        "title": "Refresh",
+        "category": "Test Radar",
+        "icon": "$(refresh)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "test-radar.refresh",
+          "when": "view == testRadar.results",
+          "group": "navigation"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
