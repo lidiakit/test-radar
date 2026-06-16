@@ -31,6 +31,9 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     provider, // disposes the auto-refresh timer on deactivate
     vscode.window.registerTreeDataProvider("testRadar.results", provider),
+    vscode.commands.registerCommand("test-radar.refresh", () =>
+      provider.refresh(),
+    ),
   );
 
   // Kick off the first load of CI data.
