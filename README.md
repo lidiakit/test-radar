@@ -16,7 +16,7 @@ No more flipping to the browser to read CI logs. Test Radar watches the branch y
 - **Live updates.** Auto-refreshes while a run is queued or in progress, plus a manual refresh button.
 - **One click to the full run.** "View run on GitHub" opens the Actions page in your browser.
 
-![All tests passing, and the in-progress state](https://raw.githubusercontent.com/lidiakit/test-radar/main/media/states.png)
+![Test Radar showing a green run — all tests passed](https://raw.githubusercontent.com/lidiakit/test-radar/main/media/states.png)
 
 ## Requirements
 
