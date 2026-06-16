@@ -30,6 +30,9 @@ type LoadState =
       branch: string;
       run: WorkflowRun | undefined;
       report: ReportState;
+      // Repo root, used to resolve a failing test's (repo-relative) file path
+      // into an openable URI.
+      rootUri: vscode.Uri;
     };
 
 const ARTIFACT_NAME = "test-results";
@@ -83,7 +86,13 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
             session.accessToken,
           )
         : ({ kind: "none" } as ReportState);
-      this.setState({ kind: "loaded", branch, run, report });
+      this.setState({
+        kind: "loaded",
+        branch,
+        run,
+        report,
+        rootUri: repo.rootUri,
+      });
     } catch (err) {
       this.setState({
         kind: "error",
@@ -134,7 +143,7 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
 
   getChildren(element?: vscode.TreeItem): vscode.TreeItem[] {
     if (element instanceof RunItem) {
-      return runChildren(element.report);
+      return runChildren(element.report, element.rootUri);
     }
     if (element) {
       return [];
@@ -172,7 +181,10 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
             labelRow("No CI runs found for this branch", "info"),
           ];
         }
-        return [branchItem, new RunItem(this.state.run, this.state.report)];
+        return [
+          branchItem,
+          new RunItem(this.state.run, this.state.report, this.state.rootUri),
+        ];
       }
     }
   }
@@ -183,6 +195,7 @@ class RunItem extends vscode.TreeItem {
   constructor(
     readonly run: WorkflowRun,
     readonly report: ReportState,
+    readonly rootUri: vscode.Uri,
   ) {
     super(
       `Run #${run.runNumber} · ${runLabel(run)}`,
@@ -217,11 +230,11 @@ function summaryText(run: WorkflowRun, report: ReportState): string {
 
 // Children of a run row: one row per failing test, or a hint when the report
 // couldn't be loaded.
-function runChildren(report: ReportState): vscode.TreeItem[] {
+function runChildren(report: ReportState, rootUri: vscode.Uri): vscode.TreeItem[] {
   if (report.kind === "ready") {
     return report.report.cases
       .filter((c) => c.status === "failed")
-      .map(failureRow);
+      .map((c) => failureRow(c, rootUri));
   }
   if (report.kind === "unavailable") {
     return [labelRow(`Test results unavailable — ${report.reason}`, "warning")];
@@ -229,7 +242,10 @@ function runChildren(report: ReportState): vscode.TreeItem[] {
   return [];
 }
 
-function failureRow(testCase: TestCaseResult): vscode.TreeItem {
+function failureRow(
+  testCase: TestCaseResult,
+  rootUri: vscode.Uri,
+): vscode.TreeItem {
   const item = new vscode.TreeItem(testCase.name);
   item.iconPath = new vscode.ThemeIcon(
     "error",
@@ -241,7 +257,35 @@ function failureRow(testCase: TestCaseResult): vscode.TreeItem {
     tooltip.appendCodeblock(testCase.message);
     item.tooltip = tooltip;
   }
+
+  // Clicking the row opens the test's source file. Prefer an explicit `file`
+  // attribute; fall back to `classname`, which is the file path for Vitest.
+  const path = testCase.file ?? testCase.classname;
+  const uri = resolveTestUri(rootUri, path);
+  if (uri) {
+    item.command = {
+      command: "vscode.open",
+      title: "Open Test File",
+      arguments: [uri],
+    };
+  }
   return item;
+}
+
+// Resolves a test's recorded path to an openable URI. Absolute paths (some
+// reporters emit them) are used as-is; repo-relative ones are joined onto the
+// repo root. Returns undefined when there's no usable path.
+function resolveTestUri(
+  rootUri: vscode.Uri,
+  path: string,
+): vscode.Uri | undefined {
+  if (!path) {
+    return undefined;
+  }
+  if (path.startsWith("/")) {
+    return vscode.Uri.file(path);
+  }
+  return vscode.Uri.joinPath(rootUri, path);
 }
 
 function labelRow(label: string, icon: string): vscode.TreeItem {

@@ -2,13 +2,15 @@ import { XMLParser } from "fast-xml-parser";
 
 // A single test case lifted out of a JUnit report. `classname` is the source
 // file/suite the runner recorded (e.g. "src/math.test.ts"); `name` is the full
-// test name including any describe path. `message` holds the failure/error text
-// when the case failed, and is undefined otherwise.
+// test name including any describe path. `file` is the source file path when the
+// reporter records one as a `file` attribute (some do, some don't). `message`
+// holds the failure/error text when the case failed, and is undefined otherwise.
 export type TestStatus = "passed" | "failed" | "skipped";
 
 export interface TestCaseResult {
   name: string;
   classname: string;
+  file?: string;
   status: TestStatus;
   message?: string;
 }
@@ -55,6 +57,9 @@ function failureMessage(node: unknown): string | undefined {
 function toCase(testcase: Record<string, unknown>): TestCaseResult {
   const name = String(testcase["@_name"] ?? "");
   const classname = String(testcase["@_classname"] ?? "");
+  const fileAttr = testcase["@_file"];
+  const file = fileAttr === undefined ? undefined : String(fileAttr);
+  const base = { name, classname, file };
 
   // A failure or error child means the case failed; <skipped> means it didn't
   // run. fast-xml-parser collapses a repeated child to an array, so take the
@@ -62,12 +67,12 @@ function toCase(testcase: Record<string, unknown>): TestCaseResult {
   const failure = testcase.failure ?? testcase.error;
   if (failure !== undefined) {
     const first = Array.isArray(failure) ? failure[0] : failure;
-    return { name, classname, status: "failed", message: failureMessage(first) };
+    return { ...base, status: "failed", message: failureMessage(first) };
   }
   if (testcase.skipped !== undefined) {
-    return { name, classname, status: "skipped" };
+    return { ...base, status: "skipped" };
   }
-  return { name, classname, status: "passed" };
+  return { ...base, status: "passed" };
 }
 
 // Parses a JUnit XML string (as produced by Jest/Vitest/Playwright/Detox) into a
