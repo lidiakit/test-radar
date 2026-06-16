@@ -26,3 +26,13 @@ jobs:
 
       - name: Build
         run: node esbuild.js --production
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results/junit.xml

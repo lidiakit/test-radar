@@ -1,7 +1,23 @@
 import * as vscode from "vscode";
 import { GitAPI } from "./git";
 import { getGitHubSession } from "./auth";
-import { fetchLatestRun, parseOwnerRepo, WorkflowRun } from "./github";
+import {
+  fetchLatestRun,
+  parseOwnerRepo,
+  listRunArtifacts,
+  findArtifact,
+  downloadArtifactZip,
+  extractJunitXml,
+  WorkflowRun,
+} from "./github";
+import { parseJunitXml, JunitReport, TestCaseResult } from "./junit";
+
+// The outcome of trying to load a run's test-results artifact. Kept separate
+// from the run itself so an expired/missing artifact still shows the run.
+type ReportState =
+  | { kind: "none" } // run not completed yet — no artifact to expect
+  | { kind: "unavailable"; reason: string } // no artifact, or couldn't read it
+  | { kind: "ready"; report: JunitReport };
 
 type LoadState =
   | { kind: "loading" }
@@ -9,7 +25,14 @@ type LoadState =
   | { kind: "noRepo" }
   | { kind: "noRemote" }
   | { kind: "error"; message: string }
-  | { kind: "loaded"; branch: string; run: WorkflowRun | undefined };
+  | {
+      kind: "loaded";
+      branch: string;
+      run: WorkflowRun | undefined;
+      report: ReportState;
+    };
+
+const ARTIFACT_NAME = "test-results";
 
 export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
@@ -52,12 +75,51 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
         branch,
         session.accessToken,
       );
-      this.setState({ kind: "loaded", branch, run });
+      const report = run
+        ? await this.loadReport(
+            ownerRepo.owner,
+            ownerRepo.repo,
+            run,
+            session.accessToken,
+          )
+        : ({ kind: "none" } as ReportState);
+      this.setState({ kind: "loaded", branch, run, report });
     } catch (err) {
       this.setState({
         kind: "error",
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  // Downloads and parses the run's test-results artifact. Artifact problems are
+  // returned as `unavailable` rather than thrown, so they don't hide the run.
+  private async loadReport(
+    owner: string,
+    repo: string,
+    run: WorkflowRun,
+    token: string,
+  ): Promise<ReportState> {
+    if (run.status !== "completed") {
+      return { kind: "none" };
+    }
+    try {
+      const artifacts = await listRunArtifacts(owner, repo, run.id, token);
+      const artifact = findArtifact(artifacts, ARTIFACT_NAME);
+      if (!artifact) {
+        return { kind: "unavailable", reason: "No test-results artifact" };
+      }
+      const zip = await downloadArtifactZip(owner, repo, artifact.id, token);
+      const xml = extractJunitXml(zip);
+      if (!xml) {
+        return { kind: "unavailable", reason: "Artifact has no junit.xml" };
+      }
+      return { kind: "ready", report: parseJunitXml(xml) };
+    } catch (err) {
+      return {
+        kind: "unavailable",
+        reason: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -71,6 +133,9 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
   }
 
   getChildren(element?: vscode.TreeItem): vscode.TreeItem[] {
+    if (element instanceof RunItem) {
+      return runChildren(element.report);
+    }
     if (element) {
       return [];
     }
@@ -107,17 +172,76 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
             labelRow("No CI runs found for this branch", "info"),
           ];
         }
-        const run = this.state.run;
-        const runItem = new vscode.TreeItem(
-          `Run #${run.runNumber} · ${runLabel(run)}`,
-        );
-        runItem.iconPath = runIcon(run);
-        runItem.description = run.name;
-        runItem.tooltip = `${run.name} — ${run.status}`;
-        return [branchItem, runItem];
+        return [branchItem, new RunItem(this.state.run, this.state.report)];
       }
     }
   }
+}
+
+// The run row. Expands to show failing tests when the parsed report has any.
+class RunItem extends vscode.TreeItem {
+  constructor(
+    readonly run: WorkflowRun,
+    readonly report: ReportState,
+  ) {
+    super(
+      `Run #${run.runNumber} · ${runLabel(run)}`,
+      isExpandable(report)
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    this.iconPath = runIcon(run);
+    this.description = summaryText(run, report);
+    this.tooltip = `${run.name} — ${run.status}`;
+  }
+}
+
+// The run row expands when it has something to show underneath: failing tests,
+// or an explanation of why the results couldn't be loaded.
+function isExpandable(report: ReportState): boolean {
+  if (report.kind === "ready") {
+    return report.report.failures > 0;
+  }
+  return report.kind === "unavailable";
+}
+
+// What the run row shows after its status: a test summary when we have a report,
+// otherwise the workflow name (the prior behaviour).
+function summaryText(run: WorkflowRun, report: ReportState): string {
+  if (report.kind === "ready") {
+    const { total, failures } = report.report;
+    return failures > 0 ? `${failures} of ${total} failed` : `${total} passed`;
+  }
+  return run.name;
+}
+
+// Children of a run row: one row per failing test, or a hint when the report
+// couldn't be loaded.
+function runChildren(report: ReportState): vscode.TreeItem[] {
+  if (report.kind === "ready") {
+    return report.report.cases
+      .filter((c) => c.status === "failed")
+      .map(failureRow);
+  }
+  if (report.kind === "unavailable") {
+    return [labelRow(`Test results unavailable — ${report.reason}`, "warning")];
+  }
+  return [];
+}
+
+function failureRow(testCase: TestCaseResult): vscode.TreeItem {
+  const item = new vscode.TreeItem(testCase.name);
+  item.iconPath = new vscode.ThemeIcon(
+    "error",
+    new vscode.ThemeColor("testing.iconFailed"),
+  );
+  item.description = testCase.classname;
+  if (testCase.message) {
+    const tooltip = new vscode.MarkdownString();
+    tooltip.appendCodeblock(testCase.message);
+    item.tooltip = tooltip;
+  }
+  return item;
 }
 
 function labelRow(label: string, icon: string): vscode.TreeItem {
