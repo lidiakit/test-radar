@@ -38,13 +38,26 @@ type LoadState =
 
 const ARTIFACT_NAME = "test-results";
 
-export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+// How often to re-check a run that hasn't completed yet. A run that's queued or
+// in progress has no artifact to read, so each poll is a single cheap API call.
+const POLL_INTERVAL_MS = 10_000;
+
+export class TestRadarProvider
+  implements vscode.TreeDataProvider<vscode.TreeItem>, vscode.Disposable
+{
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private state: LoadState = { kind: "loading" };
+  // Pending auto-refresh while a run is still running; undefined when idle.
+  private pollTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly git: GitAPI | undefined) {}
+
+  dispose(): void {
+    this.clearPoll();
+    this._onDidChangeTreeData.dispose();
+  }
 
   async refresh(): Promise<void> {
     const repo = this.git?.repositories[0];
@@ -135,7 +148,20 @@ export class TestRadarProvider implements vscode.TreeDataProvider<vscode.TreeIte
 
   private setState(state: LoadState): void {
     this.state = state;
+    // Any prior poll is now stale. Re-arm it only while a run is still going, so
+    // the tree follows it queued → in progress → completed on its own.
+    this.clearPoll();
+    if (isRunInProgress(state)) {
+      this.pollTimer = setTimeout(() => void this.refresh(), POLL_INTERVAL_MS);
+    }
     this._onDidChangeTreeData.fire();
+  }
+
+  private clearPoll(): void {
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = undefined;
+    }
   }
 
   getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
@@ -208,6 +234,16 @@ class RunItem extends vscode.TreeItem {
     this.description = summaryText(run, report);
     this.tooltip = `${run.name} — ${run.status}`;
   }
+}
+
+// True while the loaded run is queued or in progress — i.e. worth polling until
+// it reaches "completed".
+function isRunInProgress(state: LoadState): boolean {
+  return (
+    state.kind === "loaded" &&
+    state.run !== undefined &&
+    state.run.status !== "completed"
+  );
 }
 
 // The run row expands when it has something to show underneath: failing tests,
