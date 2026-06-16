@@ -254,13 +254,11 @@ function isRunInProgress(state: LoadState): boolean {
   );
 }
 
-// The run row expands when it has something to show underneath: failing tests,
-// or an explanation of why the results couldn't be loaded.
+// The run row expands whenever we have a parsed report (to show failures, an
+// all-passed message, or "no tests") or an explanation of why results couldn't
+// be loaded. Only an in-progress run (kind "none") has nothing underneath.
 function isExpandable(report: ReportState): boolean {
-  if (report.kind === "ready") {
-    return report.report.failures > 0;
-  }
-  return report.kind === "unavailable";
+  return report.kind === "ready" || report.kind === "unavailable";
 }
 
 // What the run row shows after its status: a test summary when we have a report,
@@ -268,9 +266,18 @@ function isExpandable(report: ReportState): boolean {
 function summaryText(run: WorkflowRun, report: ReportState): string {
   if (report.kind === "ready") {
     const { total, failures } = report.report;
-    return failures > 0 ? `${failures} of ${total} failed` : `${total} passed`;
+    if (failures > 0) {
+      return `${failures} of ${total} failed`;
+    }
+    const skipped = countSkipped(report.report);
+    const passed = total - skipped;
+    return skipped > 0 ? `${passed} passed, ${skipped} skipped` : `${passed} passed`;
   }
   return run.name;
+}
+
+function countSkipped(report: JunitReport): number {
+  return report.cases.filter((c) => c.status === "skipped").length;
 }
 
 // Children of a run row: the failing tests, or a hint when the report couldn't
@@ -279,7 +286,14 @@ function summaryText(run: WorkflowRun, report: ReportState): string {
 // list stays scannable.
 function runChildren(report: ReportState, rootUri: vscode.Uri): vscode.TreeItem[] {
   if (report.kind === "ready") {
+    if (report.report.total === 0) {
+      return [labelRow("No tests reported in this run", "info")];
+    }
     const failures = report.report.cases.filter((c) => c.status === "failed");
+    if (failures.length === 0) {
+      // The happy path — a clear, friendly confirmation rather than a bare row.
+      return [passRow(report.report)];
+    }
     const groups = groupByFile(failures);
     if (groups.length > 1) {
       return groups.map((g) => new FileGroupItem(g.file, g.cases, rootUri));
@@ -290,6 +304,23 @@ function runChildren(report: ReportState, rootUri: vscode.Uri): vscode.TreeItem[
     return [labelRow(`Test results unavailable — ${report.reason}`, "warning")];
   }
   return [];
+}
+
+// Shown under a run where nothing failed: celebratory when everything ran green,
+// neutral-positive when some tests were skipped.
+function passRow(report: JunitReport): vscode.TreeItem {
+  const skipped = countSkipped(report);
+  const passed = report.total - skipped;
+  const label =
+    skipped > 0
+      ? `${passed} passed, ${skipped} skipped`
+      : `All ${passed} tests passed 🎉`;
+  const item = new vscode.TreeItem(label);
+  item.iconPath = new vscode.ThemeIcon(
+    "pass",
+    new vscode.ThemeColor("testing.iconPassed"),
+  );
+  return item;
 }
 
 // A per-file grouping row shown when failures span multiple files. Expands to
