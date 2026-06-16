@@ -116,4 +116,20 @@ describe("parseJunitXml", () => {
     const xml = `<testsuites><testsuite name="s" tests="0"/></testsuites>`;
     expect(parseJunitXml(xml)).toEqual({ total: 0, failures: 0, cases: [] });
   });
+
+  it("captures the file attribute when the reporter records one", () => {
+    const xml = `<testsuites><testsuite name="s">
+      <testcase classname="math suite" name="adds" file="src/math.test.ts"/>
+    </testsuite></testsuites>`;
+
+    expect(parseJunitXml(xml).cases[0].file).toBe("src/math.test.ts");
+  });
+
+  it("leaves file undefined when there is no file attribute", () => {
+    const xml = `<testsuites><testsuite name="s">
+      <testcase classname="src/a.test.ts" name="adds"/>
+    </testsuite></testsuites>`;
+
+    expect(parseJunitXml(xml).cases[0].file).toBeUndefined();
+  });
 });
