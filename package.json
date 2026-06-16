@@ -23,6 +23,12 @@
         "title": "Refresh",
         "category": "Test Radar",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "test-radar.openRun",
+        "title": "View run on GitHub",
+        "category": "Test Radar",
+        "icon": "$(link-external)"
       }
     ],
     "menus": {
@@ -31,6 +37,13 @@
           "command": "test-radar.refresh",
           "when": "view == testRadar.results",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "test-radar.openRun",
+          "when": "view == testRadar.results && viewItem == run",
+          "group": "inline"
         }
       ]
     },

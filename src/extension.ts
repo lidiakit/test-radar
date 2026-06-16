@@ -29,6 +29,15 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("test-radar.refresh", () =>
       provider.refresh(),
     ),
+    // Invoked from the run row's inline action; the tree item carries runUrl.
+    vscode.commands.registerCommand(
+      "test-radar.openRun",
+      (item?: { runUrl?: string }) => {
+        if (item?.runUrl) {
+          void vscode.env.openExternal(vscode.Uri.parse(item.runUrl));
+        }
+      },
+    ),
   );
 
   // Kick off the first load of CI data.
