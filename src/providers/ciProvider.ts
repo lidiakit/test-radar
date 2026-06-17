@@ -25,15 +25,9 @@ export type CiRunResult =
   | { kind: "run"; run: WorkflowRun; report: CiReportResult }
   | { kind: "noRun" };
 
-// The uniform "needs auth" signal every provider throws when its credentials are
-// missing (or were rejected). Carries no token/URL/header — only which provider
-// needs attention, so the UI can render the right "set credentials" action.
-export class NeedsAuthError extends Error {
-  constructor(readonly providerId: string) {
-    super(`${providerId} needs authentication`);
-    this.name = "NeedsAuthError";
-  }
-}
+// Re-exported from its own vscode-free module so the pure network layer can
+// throw it without importing vscode. See ./needsAuth.
+export { NeedsAuthError } from "./needsAuth";
 
 // A CI backend Test Radar can read test results from. Auth is internal to each
 // provider — the token never crosses this boundary; a provider throws

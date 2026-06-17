@@ -10,6 +10,7 @@ import {
   NeedsAuthError,
 } from "./providers/ciProvider";
 import { GitHubCiProvider } from "./providers/githubProvider";
+import { CircleCiProvider } from "./providers/circleciProvider";
 import { selectProviderId } from "./providers/selection";
 
 // The outcome of trying to load a run's test results. Provider-neutral; defined
@@ -20,10 +21,9 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "needsAuth"; actionLabel: string; authCommand: string }
   | { kind: "noRepo" }
-  | { kind: "noRemote" }
-  // A provider was selected but isn't wired up yet (CircleCI, until a later
-  // piece). Shows a clean "coming soon" row instead of crashing.
-  | { kind: "providerUnavailable"; label: string }
+  // The selected provider can't address this repo (no GitHub remote, or no
+  // resolvable CircleCI project slug). `label` is provider-specific.
+  | { kind: "noRemote"; label: string }
   | { kind: "error"; message: string }
   | {
       kind: "loaded";
@@ -48,11 +48,14 @@ export class TestRadarProvider
   private activeProvider: CiProvider | undefined;
 
   private readonly github = new GitHubCiProvider();
+  private readonly circleci: CircleCiProvider;
 
   constructor(
     private readonly git: GitAPI | undefined,
     private readonly context: vscode.ExtensionContext,
-  ) {}
+  ) {
+    this.circleci = new CircleCiProvider(context);
+  }
 
   dispose(): void {
     this.clearPoll();
@@ -81,14 +84,14 @@ export class TestRadarProvider
 
     const provider = await this.selectProvider(ctx);
     this.activeProvider = provider;
-    if (!provider) {
-      return this.setState({
-        kind: "providerUnavailable",
-        label: "CircleCI results aren't available yet",
-      });
-    }
     if (!provider.canHandle(ctx)) {
-      return this.setState({ kind: "noRemote" });
+      return this.setState({
+        kind: "noRemote",
+        label:
+          provider.id === "circleci"
+            ? "No CircleCI project — set testRadar.circleci.projectSlug"
+            : "No GitHub remote found",
+      });
     }
 
     this.setState({ kind: "loading" });
@@ -117,12 +120,8 @@ export class TestRadarProvider
   }
 
   // Picks the provider for this repo from the `testRadar.provider` setting plus
-  // what CI config the repo has. Returns undefined when the chosen provider
-  // isn't wired up yet (CircleCI, until a later piece) so the tree can show a
-  // clean "coming soon" row. The pure decision lives in `selectProviderId`.
-  private async selectProvider(
-    ctx: CiContext,
-  ): Promise<CiProvider | undefined> {
+  // what CI config the repo has. The pure decision lives in `selectProviderId`.
+  private async selectProvider(ctx: CiContext): Promise<CiProvider> {
     const setting = vscode.workspace
       .getConfiguration("testRadar")
       .get<string>("provider", "auto");
@@ -142,11 +141,7 @@ export class TestRadarProvider
       hasGithubWorkflows,
       githubRemoteParses,
     );
-    if (id === "github") {
-      return this.github;
-    }
-    // CircleCI is selected but not implemented yet.
-    return undefined;
+    return id === "circleci" ? this.circleci : this.github;
   }
 
   private setState(state: LoadState): void {
@@ -192,8 +187,6 @@ export class TestRadarProvider
       case "noRepo":
         return [labelRow("No Git repository open", "info")];
       case "noRemote":
-        return [labelRow("No GitHub remote found", "info")];
-      case "providerUnavailable":
         return [labelRow(this.state.label, "info")];
       case "needsAuth": {
         const item = new vscode.TreeItem(this.state.actionLabel);

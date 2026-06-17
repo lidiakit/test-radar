@@ -3,7 +3,15 @@ import {
   parseProjectSlug,
   resolveProjectSlug,
   mapTestsToReport,
+  mapWorkflowStatus,
+  pickJob,
+  pickJunitArtifact,
+  latestPipeline,
+  workflowHtmlUrl,
   type CircleTest,
+  type CircleJob,
+  type CircleArtifact,
+  type CirclePipeline,
 } from "./circleci";
 import { findTestLine } from "./stack";
 
@@ -238,5 +246,118 @@ describe("resolveProjectSlug", () => {
     expect(
       resolveProjectSlug("", "https://gitlab.com/team/widget.git"),
     ).toBeUndefined();
+  });
+});
+
+describe("mapWorkflowStatus", () => {
+  it("maps terminal states to completed with the right conclusion", () => {
+    expect(mapWorkflowStatus("success")).toEqual({
+      status: "completed",
+      conclusion: "success",
+    });
+    expect(mapWorkflowStatus("failed")).toEqual({
+      status: "completed",
+      conclusion: "failure",
+    });
+    expect(mapWorkflowStatus("error")).toEqual({
+      status: "completed",
+      conclusion: "failure",
+    });
+    expect(mapWorkflowStatus("unauthorized")).toEqual({
+      status: "completed",
+      conclusion: "failure",
+    });
+    expect(mapWorkflowStatus("canceled")).toEqual({
+      status: "completed",
+      conclusion: "cancelled",
+    });
+    expect(mapWorkflowStatus("not_run")).toEqual({
+      status: "completed",
+      conclusion: null,
+    });
+  });
+
+  it("keeps active states non-completed (poll stays alive) with null conclusion", () => {
+    for (const s of ["running", "failing", "on_hold"]) {
+      const mapped = mapWorkflowStatus(s);
+      expect(mapped.status).not.toBe("completed");
+      expect(mapped.conclusion).toBeNull();
+    }
+  });
+});
+
+describe("pickJob", () => {
+  const jobs: CircleJob[] = [
+    { name: "install", job_number: 1, stopped_at: "2026-06-17T10:00:00Z" },
+    { name: "approve", type: "approval" }, // no job_number — a gate, never picked
+    { name: "test", job_number: 3, stopped_at: "2026-06-17T10:05:00Z" },
+    { name: "lint", job_number: 2, stopped_at: "2026-06-17T10:03:00Z" },
+  ];
+
+  it("unpinned: returns the most-recent finished job by stopped_at", () => {
+    expect(pickJob(jobs)?.name).toBe("test");
+  });
+
+  it("pinned: locates the job by name", () => {
+    expect(pickJob(jobs, "lint")?.job_number).toBe(2);
+  });
+
+  it("pinned: returns undefined when the name isn't found", () => {
+    expect(pickJob(jobs, "nope")).toBeUndefined();
+  });
+
+  it("never picks a gate job without a job_number", () => {
+    expect(pickJob([{ name: "approve", type: "approval" }])).toBeUndefined();
+  });
+
+  it("returns undefined when no job has finished yet", () => {
+    expect(
+      pickJob([{ name: "running", job_number: 9 }]), // no stopped_at
+    ).toBeUndefined();
+  });
+});
+
+describe("pickJunitArtifact", () => {
+  const make = (path: string): CircleArtifact => ({
+    path,
+    url: `https://circleci.com/${path}`,
+  });
+
+  it("prefers a path ending in junit.xml", () => {
+    const items = [make("out/results.xml"), make("out/junit.xml")];
+    expect(pickJunitArtifact(items)?.path).toBe("out/junit.xml");
+  });
+
+  it("falls back to any .xml when no junit.xml is present", () => {
+    expect(pickJunitArtifact([make("out/results.xml")])?.path).toBe(
+      "out/results.xml",
+    );
+  });
+
+  it("returns undefined when there's no xml artifact", () => {
+    expect(pickJunitArtifact([make("out/trace.zip")])).toBeUndefined();
+  });
+});
+
+describe("latestPipeline", () => {
+  it("returns the pipeline with the newest created_at (order not assumed)", () => {
+    const pipelines: CirclePipeline[] = [
+      { id: "a", number: 1, created_at: "2026-06-17T10:00:00Z" },
+      { id: "c", number: 3, created_at: "2026-06-17T12:00:00Z" },
+      { id: "b", number: 2, created_at: "2026-06-17T11:00:00Z" },
+    ];
+    expect(latestPipeline(pipelines)?.id).toBe("c");
+  });
+
+  it("returns undefined for an empty list", () => {
+    expect(latestPipeline([])).toBeUndefined();
+  });
+});
+
+describe("workflowHtmlUrl", () => {
+  it("builds an app.circleci.com URL from slug segments, pipeline number, workflow id", () => {
+    expect(workflowHtmlUrl("gh/org/repo", 42, "wf-123")).toBe(
+      "https://app.circleci.com/pipelines/gh/org/repo/42/workflows/wf-123",
+    );
   });
 });
