@@ -1,28 +1,23 @@
 import * as vscode from "vscode";
 import { GitAPI } from "./git";
-import { getGitHubSession } from "./auth";
-import {
-  fetchLatestRun,
-  parseOwnerRepo,
-  listRunArtifacts,
-  findArtifact,
-  downloadArtifactZip,
-  extractJunitXml,
-  WorkflowRun,
-} from "./github";
-import { parseJunitXml, groupByFile, JunitReport, TestCaseResult } from "./junit";
+import { WorkflowRun } from "./github";
+import { groupByFile, JunitReport, TestCaseResult } from "./junit";
 import { findTestLine } from "./stack";
+import {
+  CiContext,
+  CiProvider,
+  CiReportResult,
+  NeedsAuthError,
+} from "./providers/ciProvider";
+import { GitHubCiProvider } from "./providers/githubProvider";
 
-// The outcome of trying to load a run's test-results artifact. Kept separate
-// from the run itself so an expired/missing artifact still shows the run.
-type ReportState =
-  | { kind: "none" } // run not completed yet — no artifact to expect
-  | { kind: "unavailable"; reason: string } // no artifact, or couldn't read it
-  | { kind: "ready"; report: JunitReport };
+// The outcome of trying to load a run's test results. Provider-neutral; defined
+// in the provider abstraction and reused here verbatim.
+type ReportState = CiReportResult;
 
 type LoadState =
   | { kind: "loading" }
-  | { kind: "signedOut" }
+  | { kind: "needsAuth"; actionLabel: string; authCommand: string }
   | { kind: "noRepo" }
   | { kind: "noRemote" }
   | { kind: "error"; message: string }
@@ -36,12 +31,6 @@ type LoadState =
       rootUri: vscode.Uri;
     };
 
-const ARTIFACT_NAME = "test-results";
-
-// How often to re-check a run that hasn't completed yet. A run that's queued or
-// in progress has no artifact to read, so each poll is a single cheap API call.
-const POLL_INTERVAL_MS = 10_000;
-
 export class TestRadarProvider
   implements vscode.TreeDataProvider<vscode.TreeItem>, vscode.Disposable
 {
@@ -51,8 +40,15 @@ export class TestRadarProvider
   private state: LoadState = { kind: "loading" };
   // Pending auto-refresh while a run is still running; undefined when idle.
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
+  // The provider serving the current state — drives the poll interval.
+  private activeProvider: CiProvider | undefined;
 
-  constructor(private readonly git: GitAPI | undefined) {}
+  private readonly github = new GitHubCiProvider();
+
+  constructor(
+    private readonly git: GitAPI | undefined,
+    private readonly context: vscode.ExtensionContext,
+  ) {}
 
   dispose(): void {
     this.clearPoll();
@@ -73,41 +69,36 @@ export class TestRadarProvider
       });
     }
 
-    const remoteUrl = repo.state.remotes[0]?.fetchUrl;
-    const ownerRepo = remoteUrl ? parseOwnerRepo(remoteUrl) : undefined;
-    if (!ownerRepo) {
-      return this.setState({ kind: "noRemote" });
-    }
+    const ctx: CiContext = {
+      rootUri: repo.rootUri,
+      remoteUrl: repo.state.remotes[0]?.fetchUrl,
+      branch,
+    };
 
-    const session = await getGitHubSession();
-    if (!session) {
-      return this.setState({ kind: "signedOut" });
+    const provider = this.selectProvider(ctx);
+    this.activeProvider = provider;
+    if (!provider.canHandle(ctx)) {
+      return this.setState({ kind: "noRemote" });
     }
 
     this.setState({ kind: "loading" });
     try {
-      const run = await fetchLatestRun(
-        ownerRepo.owner,
-        ownerRepo.repo,
-        branch,
-        session.accessToken,
-      );
-      const report = run
-        ? await this.loadReport(
-            ownerRepo.owner,
-            ownerRepo.repo,
-            run,
-            session.accessToken,
-          )
-        : ({ kind: "none" } as ReportState);
+      const result = await provider.getLatestRun(ctx);
       this.setState({
         kind: "loaded",
         branch,
-        run,
-        report,
+        run: result.kind === "run" ? result.run : undefined,
+        report: result.kind === "run" ? result.report : { kind: "none" },
         rootUri: repo.rootUri,
       });
     } catch (err) {
+      if (err instanceof NeedsAuthError) {
+        return this.setState({
+          kind: "needsAuth",
+          actionLabel: provider.authActionLabel,
+          authCommand: provider.authCommand,
+        });
+      }
       this.setState({
         kind: "error",
         message: err instanceof Error ? err.message : String(err),
@@ -115,35 +106,10 @@ export class TestRadarProvider
     }
   }
 
-  // Downloads and parses the run's test-results artifact. Artifact problems are
-  // returned as `unavailable` rather than thrown, so they don't hide the run.
-  private async loadReport(
-    owner: string,
-    repo: string,
-    run: WorkflowRun,
-    token: string,
-  ): Promise<ReportState> {
-    if (run.status !== "completed") {
-      return { kind: "none" };
-    }
-    try {
-      const artifacts = await listRunArtifacts(owner, repo, run.id, token);
-      const artifact = findArtifact(artifacts, ARTIFACT_NAME);
-      if (!artifact) {
-        return { kind: "unavailable", reason: "No test-results artifact" };
-      }
-      const zip = await downloadArtifactZip(owner, repo, artifact.id, token);
-      const xml = extractJunitXml(zip);
-      if (!xml) {
-        return { kind: "unavailable", reason: "Artifact has no junit.xml" };
-      }
-      return { kind: "ready", report: parseJunitXml(xml) };
-    } catch (err) {
-      return {
-        kind: "unavailable",
-        reason: err instanceof Error ? err.message : String(err),
-      };
-    }
+  // Picks the provider for this repo. Only GitHub Actions exists today; the
+  // selection logic (auto-detect + settings) lands in a later piece.
+  private selectProvider(_ctx: CiContext): CiProvider {
+    return this.github;
   }
 
   private setState(state: LoadState): void {
@@ -152,7 +118,8 @@ export class TestRadarProvider
     // the tree follows it queued → in progress → completed on its own.
     this.clearPoll();
     if (isRunInProgress(state)) {
-      this.pollTimer = setTimeout(() => void this.refresh(), POLL_INTERVAL_MS);
+      const interval = this.activeProvider?.pollIntervalMs ?? 10_000;
+      this.pollTimer = setTimeout(() => void this.refresh(), interval);
     }
     this._onDidChangeTreeData.fire();
   }
@@ -189,12 +156,12 @@ export class TestRadarProvider
         return [labelRow("No Git repository open", "info")];
       case "noRemote":
         return [labelRow("No GitHub remote found", "info")];
-      case "signedOut": {
-        const item = new vscode.TreeItem("Sign in to GitHub");
+      case "needsAuth": {
+        const item = new vscode.TreeItem(this.state.actionLabel);
         item.iconPath = new vscode.ThemeIcon("sign-in");
         item.command = {
-          command: "test-radar.signIn",
-          title: "Sign in to GitHub",
+          command: this.state.authCommand,
+          title: this.state.actionLabel,
         };
         return [item];
       }
