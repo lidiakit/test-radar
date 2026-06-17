@@ -52,6 +52,15 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  // Re-evaluate when any Test Radar setting changes (e.g. switching providers).
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("testRadar")) {
+        void provider.refresh();
+      }
+    }),
+  );
+
   if (git) {
     // Refresh when a repo's state changes — e.g. you checkout a branch.
     const watchRepo = (repo: GitRepository) => {

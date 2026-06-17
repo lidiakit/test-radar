@@ -35,6 +35,36 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Test Radar",
+      "properties": {
+        "testRadar.provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "github",
+            "circleci"
+          ],
+          "enumDescriptions": [
+            "Auto-detect: use CircleCI when .circleci/config.yml is present and there's no .github/workflows/ directory; otherwise GitHub Actions.",
+            "Always read results from GitHub Actions.",
+            "Always read results from CircleCI."
+          ],
+          "default": "auto",
+          "markdownDescription": "Which CI provider Test Radar reads test results from. `auto` keeps zero-config behavior for GitHub users and switches to CircleCI only when a `.circleci/config.yml` is present and no `.github/workflows/` directory exists."
+        },
+        "testRadar.circleci.projectSlug": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "CircleCI project slug (e.g. `gh/org/repo`). Leave blank to derive it from the Git remote. Required for opaque `circleci/{org-id}/{project-id}` slugs, which can't be derived from a remote."
+        },
+        "testRadar.circleci.jobName": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Name of the CircleCI job whose test results to show. Leave blank to use the most-recent finished job that reported test metadata."
+        }
+      }
+    },
     "commands": [
       {
         "command": "test-radar.signIn",
