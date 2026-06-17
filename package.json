@@ -83,7 +83,7 @@
       },
       {
         "command": "test-radar.openRun",
-        "title": "View run on GitHub",
+        "title": "View run",
         "category": "Test Radar",
         "icon": "$(link-external)"
       }
