@@ -4,6 +4,11 @@ All notable changes to the Test Radar extension are documented here.
 This project follows [Keep a Changelog](http://keepachangelog.com/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1]
+
+- Fix the extension icon: re-rendered at full size (512×512) so it fills the frame
+  on the Marketplace instead of appearing small in the corner.
+
 ## [0.1.0]
 
 Initial release.
