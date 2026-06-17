@@ -4,6 +4,12 @@ All notable changes to the Test Radar extension are documented here.
 This project follows [Keep a Changelog](http://keepachangelog.com/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2]
+
+- Fix the icon's rounded corners: they were opaque white (showing as white squares
+  on dark editor themes). Re-rendered with a transparent background so the corners
+  blend into any theme.
+
 ## [0.1.1]
 
 - Fix the extension icon: re-rendered at full size (512×512) so it fills the frame

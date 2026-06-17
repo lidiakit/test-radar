@@ -2,7 +2,7 @@
   "name": "test-radar",
   "displayName": "Test Radar — CI test results in your editor",
   "description": "See which tests failed on your current branch in GitHub Actions, right in your editor — click a failure to jump to the test. Works with Jest, Vitest, Playwright, and Detox.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "lidiakit",
   "license": "MIT",
   "icon": "media/icon.png",
