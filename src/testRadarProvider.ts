@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { GitAPI } from "./git";
-import { WorkflowRun } from "./github";
+import { WorkflowRun, parseOwnerRepo } from "./github";
 import { groupByFile, JunitReport, TestCaseResult } from "./junit";
 import { findTestLine } from "./stack";
 import {
@@ -10,6 +10,7 @@ import {
   NeedsAuthError,
 } from "./providers/ciProvider";
 import { GitHubCiProvider } from "./providers/githubProvider";
+import { selectProviderId } from "./providers/selection";
 
 // The outcome of trying to load a run's test results. Provider-neutral; defined
 // in the provider abstraction and reused here verbatim.
@@ -20,6 +21,9 @@ type LoadState =
   | { kind: "needsAuth"; actionLabel: string; authCommand: string }
   | { kind: "noRepo" }
   | { kind: "noRemote" }
+  // A provider was selected but isn't wired up yet (CircleCI, until a later
+  // piece). Shows a clean "coming soon" row instead of crashing.
+  | { kind: "providerUnavailable"; label: string }
   | { kind: "error"; message: string }
   | {
       kind: "loaded";
@@ -75,8 +79,14 @@ export class TestRadarProvider
       branch,
     };
 
-    const provider = this.selectProvider(ctx);
+    const provider = await this.selectProvider(ctx);
     this.activeProvider = provider;
+    if (!provider) {
+      return this.setState({
+        kind: "providerUnavailable",
+        label: "CircleCI results aren't available yet",
+      });
+    }
     if (!provider.canHandle(ctx)) {
       return this.setState({ kind: "noRemote" });
     }
@@ -106,10 +116,37 @@ export class TestRadarProvider
     }
   }
 
-  // Picks the provider for this repo. Only GitHub Actions exists today; the
-  // selection logic (auto-detect + settings) lands in a later piece.
-  private selectProvider(_ctx: CiContext): CiProvider {
-    return this.github;
+  // Picks the provider for this repo from the `testRadar.provider` setting plus
+  // what CI config the repo has. Returns undefined when the chosen provider
+  // isn't wired up yet (CircleCI, until a later piece) so the tree can show a
+  // clean "coming soon" row. The pure decision lives in `selectProviderId`.
+  private async selectProvider(
+    ctx: CiContext,
+  ): Promise<CiProvider | undefined> {
+    const setting = vscode.workspace
+      .getConfiguration("testRadar")
+      .get<string>("provider", "auto");
+    const hasCircleConfig = await pathExists(
+      vscode.Uri.joinPath(ctx.rootUri, ".circleci", "config.yml"),
+    );
+    const hasGithubWorkflows = await pathExists(
+      vscode.Uri.joinPath(ctx.rootUri, ".github", "workflows"),
+    );
+    const githubRemoteParses = ctx.remoteUrl
+      ? parseOwnerRepo(ctx.remoteUrl) !== undefined
+      : false;
+
+    const id = selectProviderId(
+      setting,
+      hasCircleConfig,
+      hasGithubWorkflows,
+      githubRemoteParses,
+    );
+    if (id === "github") {
+      return this.github;
+    }
+    // CircleCI is selected but not implemented yet.
+    return undefined;
   }
 
   private setState(state: LoadState): void {
@@ -156,6 +193,8 @@ export class TestRadarProvider
         return [labelRow("No Git repository open", "info")];
       case "noRemote":
         return [labelRow("No GitHub remote found", "info")];
+      case "providerUnavailable":
+        return [labelRow(this.state.label, "info")];
       case "needsAuth": {
         const item = new vscode.TreeItem(this.state.actionLabel);
         item.iconPath = new vscode.ThemeIcon("sign-in");
@@ -358,6 +397,17 @@ function resolveTestUri(
     return vscode.Uri.file(path);
   }
   return vscode.Uri.joinPath(rootUri, path);
+}
+
+// Whether a workspace path exists (file or directory). `fs.stat` rejects when it
+// doesn't, which we treat as "absent" — used for the `.circleci`/`.github` probes.
+async function pathExists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function labelRow(label: string, icon: string): vscode.TreeItem {
