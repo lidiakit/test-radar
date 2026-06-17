@@ -220,7 +220,8 @@ export class TestRadarProvider
 }
 
 // The run row. Expands to show failing tests when the parsed report has any.
-// The "run" contextValue + runUrl drive the inline "View run on GitHub" action.
+// The "run" contextValue + runUrl drive the inline "View run" action (opens the
+// run on GitHub or CircleCI).
 class RunItem extends vscode.TreeItem {
   readonly contextValue = "run";
   readonly runUrl: string;
