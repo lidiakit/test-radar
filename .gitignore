@@ -9,6 +9,7 @@ test-results/
 **/.DS_Store
 
 CIRCLECI_PLAN.md
+MULTIJOB_PLAN.md
 
 # Personal working notes (save-session)
 .claude/session-state.md

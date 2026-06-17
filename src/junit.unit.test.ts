@@ -1,8 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { parseJunitXml, groupByFile, type TestCaseResult } from "./junit";
+import {
+  parseJunitXml,
+  groupByFile,
+  mergeReports,
+  type JunitReport,
+  type TestCaseResult,
+} from "./junit";
 
 function failed(name: string, file: string): TestCaseResult {
   return { name, classname: file, file, status: "failed" };
+}
+
+function reportOf(cases: TestCaseResult[]): JunitReport {
+  return {
+    total: cases.length,
+    failures: cases.filter((c) => c.status === "failed").length,
+    cases,
+  };
 }
 
 describe("parseJunitXml", () => {
@@ -169,5 +183,55 @@ describe("groupByFile", () => {
 
   it("returns an empty array for no cases", () => {
     expect(groupByFile([])).toEqual([]);
+  });
+});
+
+describe("mergeReports", () => {
+  const passed = (name: string, job: string): TestCaseResult => ({
+    name,
+    classname: "src/x.test.ts",
+    status: "passed",
+    job,
+  });
+  const failedIn = (name: string, job: string): TestCaseResult => ({
+    name,
+    classname: "src/x.test.ts",
+    status: "failed",
+    job,
+  });
+
+  it("concatenates cases and sums counts across reports", () => {
+    const a = reportOf([passed("a1", "unit"), failedIn("a2", "unit")]);
+    const b = reportOf([passed("b1", "e2e")]);
+    const merged = mergeReports([a, b]);
+    expect(merged.total).toBe(3);
+    expect(merged.failures).toBe(1);
+    expect(merged.cases.map((c) => c.name)).toEqual(["a1", "a2", "b1"]);
+    expect(merged.cases.map((c) => c.job)).toEqual(["unit", "unit", "e2e"]);
+  });
+
+  it("preserves the order the reports were given", () => {
+    const merged = mergeReports([
+      reportOf([passed("z", "e2e")]),
+      reportOf([passed("a", "unit")]),
+    ]);
+    expect(merged.cases.map((c) => c.name)).toEqual(["z", "a"]);
+  });
+
+  it("re-derives counts from the cases rather than trusting inputs", () => {
+    // A report whose stored counts disagree with its cases must not corrupt the
+    // merge — the merged counts come from the actual cases.
+    const bogus: JunitReport = {
+      total: 99,
+      failures: 99,
+      cases: [passed("only", "unit")],
+    };
+    const merged = mergeReports([bogus]);
+    expect(merged.total).toBe(1);
+    expect(merged.failures).toBe(0);
+  });
+
+  it("returns an empty report for no inputs", () => {
+    expect(mergeReports([])).toEqual({ total: 0, failures: 0, cases: [] });
   });
 });

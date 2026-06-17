@@ -103,7 +103,7 @@ function mapResult(
   }
 }
 
-function toCase(item: CircleTest): TestCaseResult {
+function toCase(item: CircleTest, jobName?: string): TestCaseResult {
   const name = item.name ?? "";
   const classname = item.classname ?? "";
   // Playwright's payload omits `file` entirely; some reporters send an empty
@@ -111,7 +111,7 @@ function toCase(item: CircleTest): TestCaseResult {
   // fallback (classname is the repo-relative path) kicks in.
   const file = item.file ? item.file : undefined;
   const { status, message } = mapResult(item.result, item.message);
-  return { name, classname, file, status, message };
+  return { name, classname, file, status, message, job: jobName };
 }
 
 // Maps CircleCI `/tests` items to the same JunitReport the rest of Test Radar
@@ -119,8 +119,15 @@ function toCase(item: CircleTest): TestCaseResult {
 // failureRow already runs each case's `message` through findTestLine, and the
 // real Playwright messages carry a parseable stack frame (e.g.
 // `at /root/project/foo.ct.tsx:17:15`).
-export function mapTestsToReport(items: CircleTest[]): JunitReport {
-  const cases = items.map(toCase);
+//
+// `jobName` tags every case with the job it came from. It's passed when results
+// are aggregated across several jobs, so the tree can group by job; a single-job
+// read leaves it undefined and renders by file as before.
+export function mapTestsToReport(
+  items: CircleTest[],
+  jobName?: string,
+): JunitReport {
+  const cases = items.map((item) => toCase(item, jobName));
   const failures = cases.filter((c) => c.status === "failed").length;
   return { total: cases.length, failures, cases };
 }

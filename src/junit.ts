@@ -5,6 +5,10 @@ import { XMLParser } from "fast-xml-parser";
 // test name including any describe path. `file` is the source file path when the
 // reporter records one as a `file` attribute (some do, some don't). `message`
 // holds the failure/error text when the case failed, and is undefined otherwise.
+// `job` records which CI job produced the case, set only when results are
+// aggregated across several jobs (CircleCI); single-job/GitHub reports leave it
+// undefined, so the tree adds a job grouping level only when cases actually span
+// more than one job.
 export type TestStatus = "passed" | "failed" | "skipped";
 
 export interface TestCaseResult {
@@ -13,6 +17,7 @@ export interface TestCaseResult {
   file?: string;
   status: TestStatus;
   message?: string;
+  job?: string;
 }
 
 export interface JunitReport {
@@ -24,6 +29,17 @@ export interface JunitReport {
 export interface FileGroup {
   file: string;
   cases: TestCaseResult[];
+}
+
+// Merges several reports into one: concatenates their cases (preserving the order
+// the reports were given) and re-derives the counts from the merged cases, so
+// total/failures always match what's in `cases`. Pure; used to fold the
+// per-job CircleCI reports into the single report the rest of Test Radar
+// consumes. Each report is expected to have tagged its cases with `job`.
+export function mergeReports(reports: JunitReport[]): JunitReport {
+  const cases = reports.flatMap((r) => r.cases);
+  const failures = cases.filter((c) => c.status === "failed").length;
+  return { total: cases.length, failures, cases };
 }
 
 // Groups cases by their source file (the `file` attribute, else `classname`),
