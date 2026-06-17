@@ -71,6 +71,10 @@
         "title": "Test Radar: Sign in to GitHub"
       },
       {
+        "command": "test-radar.setCircleCiToken",
+        "title": "Test Radar: Set CircleCI token"
+      },
+      {
         "command": "test-radar.refresh",
         "title": "Refresh",
         "category": "Test Radar",
