@@ -1,30 +1,33 @@
 # Test Radar — CI test results in your editor
 
-**See which tests failed on your current branch in GitHub Actions, right in your editor — click a failure to jump straight to the test.** Works with Jest, Vitest, Playwright, Detox, and anything else that produces JUnit XML.
+**See which tests failed on your current branch — right in your editor — and click a failure to jump straight to the test.** Works with **GitHub Actions and CircleCI**, and any test runner that produces JUnit XML (Jest, Vitest, Playwright, Detox).
 
 ![Test Radar showing failing tests grouped by file, with click-to-jump](https://raw.githubusercontent.com/lidiakit/test-radar/main/media/demo.gif)
 
-No more flipping to the browser to read CI logs. Test Radar watches the branch you're on, finds its latest GitHub Actions run, and shows the test results in a sidebar — green when you're good, and a tidy, clickable list of failures when you're not.
+No more flipping to the browser to read CI logs. Test Radar watches the branch you're on, finds its latest CI run, and shows the test results in a sidebar — green when you're good, and a tidy, clickable list of failures when you're not.
 
 ## Features
 
-- **Branch-aware.** Automatically tracks your current Git branch and its latest GitHub Actions run.
-- **Real test results, not just pass/fail.** Downloads and parses the run's JUnit report, so you see individual failing tests.
+- **Branch-aware.** Automatically tracks your current Git branch and its latest run.
+- **Two providers.** Reads **GitHub Actions** artifacts or **CircleCI** test metadata. Auto-detects which to use, or pick one explicitly.
+- **Real test results, not just pass/fail.** Parses the run's JUnit results, so you see individual failing tests.
 - **Click to jump.** Click a failing test to open its file at the exact failing line, parsed from the stack trace.
 - **Grouped by file.** When failures span several files, they're grouped per file so a long list stays scannable.
 - **A friendly green state.** When everything passes, you get a clear "All N tests passed 🎉" — not a blank panel.
 - **Live updates.** Auto-refreshes while a run is queued or in progress, plus a manual refresh button.
-- **One click to the full run.** "View run on GitHub" opens the Actions page in your browser.
+- **One click to the full run.** Open the run page (GitHub or CircleCI) in your browser.
 
 ![Test Radar showing a green run — all tests passed](https://raw.githubusercontent.com/lidiakit/test-radar/main/media/states.png)
 
 ## Requirements
 
-Test Radar reads results that your CI **uploads as an artifact** — it doesn't run your tests. Two things need to be true:
+Test Radar reads results that your CI produces — it doesn't run your tests. Pick the section for your provider.
 
-1. **You're signed in to GitHub.** Run **"Test Radar: Sign in to GitHub"** from the Command Palette (or click the sign-in row in the view). This uses VS Code's built-in GitHub authentication.
+### GitHub Actions
 
-2. **Your CI uploads a JUnit report as an artifact named `test-results`.** Your test runner needs to emit a JUnit XML file, and your workflow needs to upload it under exactly that name. For example:
+1. **Sign in to GitHub.** Run **"Test Radar: Sign in to GitHub"** from the Command Palette (or click the sign-in row in the view). This uses VS Code's built-in GitHub authentication.
+
+2. **Upload a JUnit report as an artifact named `test-results`.** Your test runner needs to emit a JUnit XML file, and your workflow needs to upload it under exactly that name:
 
    ```yaml
    - name: Run tests
@@ -38,32 +41,60 @@ Test Radar reads results that your CI **uploads as an artifact** — it doesn't 
        path: test-results/junit.xml
    ```
 
-   Most runners produce JUnit XML with a small config:
-   - **Vitest** — `reporters: ['junit'], outputFile: 'test-results/junit.xml'`
-   - **Jest / Detox** — the [`jest-junit`](https://www.npmjs.com/package/jest-junit) reporter
-   - **Playwright** — `reporter: [['junit', { outputFile: 'test-results/junit.xml' }]]`
-
    The `if: always()` matters — without it, a failing test run skips the upload and Test Radar has nothing to show.
+
+### CircleCI
+
+1. **Set your CircleCI token.** Run **"Test Radar: Set CircleCI token"** from the Command Palette and paste a [CircleCI personal API token](https://app.circleci.com/settings/user/tokens). It's stored in VS Code's Secret Storage — never in your settings.
+
+2. **Store your test results in CircleCI.** Add [`store_test_results`](https://circleci.com/docs/collect-test-data/) to the job that runs your tests, so CircleCI exposes its test metadata:
+
+   ```yaml
+   - run: npm test            # configured to write a JUnit file, e.g. test-results/junit.xml
+   - store_test_results:
+       path: test-results
+   ```
+
+   If a job's test data is too large or `store_test_results` isn't configured, Test Radar falls back to a JUnit `*.xml` you've uploaded with `store_artifacts`.
+
+3. **Select the CircleCI provider.** Either let auto-detect pick it (a repo with `.circleci/config.yml` and no `.github/workflows/`), or set `testRadar.provider` to `circleci`. See [settings](#extension-settings) for the project-slug and job-name options.
+
+### Producing JUnit XML
+
+Most runners produce JUnit XML with a small config (the same file works for both providers):
+
+- **Vitest** — `reporters: ['junit'], outputFile: 'test-results/junit.xml'`
+- **Jest / Detox** — the [`jest-junit`](https://www.npmjs.com/package/jest-junit) reporter
+- **Playwright** — `reporter: [['junit', { outputFile: 'test-results/junit.xml' }]]`
 
 ## Getting started
 
-1. Install the extension and open a project hosted on GitHub.
+1. Install the extension and open a project hosted on GitHub or with a CircleCI project.
 2. Open the **Test Radar** view from the activity bar (the radar icon).
-3. Sign in to GitHub when prompted.
-4. Push a branch with the CI workflow above. Once a run finishes, its results appear in the view — click any failure to jump to the test.
+3. Authenticate when prompted — sign in to GitHub, or set your CircleCI token.
+4. Push a branch with the CI config above. Once a run finishes, its results appear in the view — click any failure to jump to the test.
 
 ## How it works
 
-For the branch you're on, Test Radar asks the GitHub API for the latest workflow run, lists its artifacts, downloads the `test-results` ZIP, unzips it in memory, parses the JUnit XML, and renders it. Nothing is executed locally and no test code is run — it only reads what CI already produced.
+For the branch you're on, Test Radar finds the latest run and renders its results — nothing is executed locally and no test code is run.
+
+- **GitHub Actions:** asks the GitHub API for the latest workflow run, downloads the `test-results` artifact ZIP, unzips it in memory, and parses the JUnit XML.
+- **CircleCI:** walks the latest pipeline → its workflows → the test-bearing job, reads CircleCI's test-metadata API (falling back to a JUnit artifact), and shows the workflow that owns that job as "the run."
 
 ## Extension settings
 
-None yet. Test Radar works with zero configuration once your CI uploads the artifact.
+Test Radar works with zero configuration for GitHub Actions. For CircleCI (or to override auto-detection):
+
+- **`testRadar.provider`** (`auto` · `github` · `circleci`, default `auto`) — which provider to read from. `auto` uses CircleCI when `.circleci/config.yml` is present and there's no `.github/workflows/` directory; otherwise GitHub Actions.
+- **`testRadar.circleci.projectSlug`** (default `""`) — CircleCI project slug (e.g. `gh/org/repo`). Leave blank to derive it from the Git remote; required for opaque `circleci/{org-id}/{project-id}` projects.
+- **`testRadar.circleci.jobName`** (default `""`) — the job whose test results to show. Leave blank to use the most-recent finished job that reported test metadata.
+
+The CircleCI token is **not** a setting — it lives only in Secret Storage (set it via the command above).
 
 ## Known limitations
 
-- **GitHub Actions only** (for now). Other CI providers aren't supported yet.
-- The artifact must be named **`test-results`** and contain a `junit.xml`.
+- The GitHub Actions artifact must be named **`test-results`** and contain a `junit.xml`.
+- For CircleCI, Test Radar shows a **single test-bearing job** per run (the most-recent finished one, or the job pinned via `testRadar.circleci.jobName`); aggregating across jobs is future work.
 - Works with the first repository in the window.
 
 ## License
