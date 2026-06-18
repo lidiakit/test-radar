@@ -5,6 +5,7 @@ import {
   mapTestsToReport,
   mapWorkflowStatus,
   pickJob,
+  pickTestJobs,
   pickJunitArtifact,
   latestPipeline,
   workflowHtmlUrl,
@@ -335,6 +336,51 @@ describe("pickJob", () => {
     expect(
       pickJob([{ name: "running", job_number: 9 }]), // no stopped_at
     ).toBeUndefined();
+  });
+});
+
+describe("pickTestJobs", () => {
+  const jobs: CircleJob[] = [
+    { name: "install", job_number: 1, stopped_at: "2026-06-17T10:00:00Z" },
+    { name: "approve", type: "approval" }, // no job_number — a gate, excluded
+    { name: "test", job_number: 3, stopped_at: "2026-06-17T10:05:00Z" },
+    { name: "lint", job_number: 2, stopped_at: "2026-06-17T10:03:00Z" },
+    { name: "running", job_number: 9 }, // no stopped_at — not finished, excluded
+  ];
+
+  it("unpinned: returns every finished runnable job, newest first", () => {
+    expect(pickTestJobs(jobs).map((j) => j.name)).toEqual([
+      "test",
+      "lint",
+      "install",
+    ]);
+  });
+
+  it("excludes gate jobs (no job_number) and jobs still running (no stopped_at)", () => {
+    const names = pickTestJobs(jobs).map((j) => j.name);
+    expect(names).not.toContain("approve");
+    expect(names).not.toContain("running");
+  });
+
+  it("pinned: narrows to exactly that one job", () => {
+    expect(pickTestJobs(jobs, "lint").map((j) => j.job_number)).toEqual([2]);
+  });
+
+  it("pinned: returns an empty list when the name isn't in this pipeline", () => {
+    expect(pickTestJobs(jobs, "nope")).toEqual([]);
+  });
+
+  it("returns an empty list when nothing has finished yet", () => {
+    expect(pickTestJobs([{ name: "running", job_number: 9 }])).toEqual([]);
+  });
+
+  it("does not mutate the input array's order", () => {
+    const input: CircleJob[] = [
+      { name: "b", job_number: 2, stopped_at: "2026-06-17T10:05:00Z" },
+      { name: "a", job_number: 1, stopped_at: "2026-06-17T10:01:00Z" },
+    ];
+    pickTestJobs(input);
+    expect(input.map((j) => j.name)).toEqual(["b", "a"]);
   });
 });
 
