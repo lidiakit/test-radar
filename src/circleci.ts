@@ -199,6 +199,38 @@ export function pickJob<T extends CircleJob>(
   );
 }
 
+// The candidate test-bearing jobs to aggregate, newest finished first. Like
+// pickJob but returns ALL of them, since results are merged across jobs rather
+// than read from a single one. CircleCI gives no a-priori "is this a test job?"
+// signal, so we return every finished runnable job and let the caller drop the
+// ones whose /tests (and artifact fallback) turn out empty — install/lint/build
+// jobs simply contribute nothing.
+//
+// A pinned name still narrows to exactly that one job (as a single-element list,
+// or empty if it isn't in this pipeline), so the existing "show one job" setting
+// keeps working. Jobs without a job_number (approval/hold gates) can't have test
+// metadata and are skipped. Sorted by stopped_at descending so the newest job
+// leads — that ordering carries through to "the run" and the job grouping.
+export function pickTestJobs<T extends CircleJob>(
+  jobs: T[],
+  pinnedName?: string,
+): T[] {
+  const runnable = jobs.filter((j) => typeof j.job_number === "number");
+  if (pinnedName) {
+    const pinned = runnable.find((j) => j.name === pinnedName);
+    return pinned ? [pinned] : [];
+  }
+  return runnable
+    .filter((j) => j.stopped_at)
+    .sort((a, b) =>
+      (a.stopped_at ?? "") < (b.stopped_at ?? "")
+        ? 1
+        : (a.stopped_at ?? "") > (b.stopped_at ?? "")
+          ? -1
+          : 0,
+    );
+}
+
 // The JUnit artifact among a job's raw artifact files: prefer one whose path ends
 // in `junit.xml`, else any `.xml`. CircleCI artifacts are individual raw files,
 // not a zip — the caller fetches `url` and parses the XML directly.
