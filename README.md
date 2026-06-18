@@ -12,7 +12,7 @@ No more flipping to the browser to read CI logs. Test Radar watches the branch y
 - **Two providers.** Reads **GitHub Actions** artifacts or **CircleCI** test metadata. Auto-detects which to use, or pick one explicitly.
 - **Real test results, not just pass/fail.** Parses the run's JUnit results, so you see individual failing tests.
 - **Click to jump.** Click a failing test to open its file at the exact failing line, parsed from the stack trace.
-- **Grouped by file.** When failures span several files, they're grouped per file so a long list stays scannable.
+- **Grouped by job and file.** On CircleCI, results from every test job in the run are aggregated and grouped by job; within a job (and on GitHub) failures are grouped per file, so a long list stays scannable.
 - **A friendly green state.** When everything passes, you get a clear "All N tests passed 🎉" — not a blank panel.
 - **Live updates.** Auto-refreshes while a run is queued or in progress, plus a manual refresh button.
 - **One click to the full run.** Open the run page (GitHub or CircleCI) in your browser.
@@ -79,7 +79,7 @@ Most runners produce JUnit XML with a small config (the same file works for both
 For the branch you're on, Test Radar finds the latest run and renders its results — nothing is executed locally and no test code is run.
 
 - **GitHub Actions:** asks the GitHub API for the latest workflow run, downloads the `test-results` artifact ZIP, unzips it in memory, and parses the JUnit XML.
-- **CircleCI:** walks the latest pipeline → its workflows → the test-bearing job, reads CircleCI's test-metadata API (falling back to a JUnit artifact), and shows the workflow that owns that job as "the run."
+- **CircleCI:** walks the latest pipeline → its workflows → every test-bearing job, reads each job's test-metadata API (falling back to a JUnit artifact), and merges them into one result grouped by job. The workflow that owns the most-recent test job is shown as "the run."
 
 ## Extension settings
 
@@ -87,14 +87,14 @@ Test Radar works with zero configuration for GitHub Actions. For CircleCI (or to
 
 - **`testRadar.provider`** (`auto` · `github` · `circleci`, default `auto`) — which provider to read from. `auto` uses CircleCI when `.circleci/config.yml` is present and there's no `.github/workflows/` directory; otherwise GitHub Actions.
 - **`testRadar.circleci.projectSlug`** (default `""`) — CircleCI project slug (e.g. `gh/org/repo`). Leave blank to derive it from the Git remote; required for opaque `circleci/{org-id}/{project-id}` projects.
-- **`testRadar.circleci.jobName`** (default `""`) — the job whose test results to show. Leave blank to use the most-recent finished job that reported test metadata.
+- **`testRadar.circleci.jobName`** (default `""`) — pin results to a single job by name. Leave blank to aggregate every test-bearing job in the run (grouped by job).
 
 The CircleCI token is **not** a setting — it lives only in Secret Storage (set it via the command above).
 
 ## Known limitations
 
 - The GitHub Actions artifact must be named **`test-results`** and contain a `junit.xml`.
-- For CircleCI, Test Radar shows a **single test-bearing job** per run (the most-recent finished one, or the job pinned via `testRadar.circleci.jobName`); aggregating across jobs is future work.
+- For CircleCI, Test Radar aggregates every test-bearing job in a single workflow run; pin to one job with `testRadar.circleci.jobName`. Clicking an e2e failure to jump to its file assumes a standard CircleCI checkout path (`/root/project` or `/home/circleci/project`).
 - Works with the first repository in the window.
 
 ## License

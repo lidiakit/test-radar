@@ -2,7 +2,7 @@
   "name": "test-radar",
   "displayName": "Test Radar — CI test results in your editor",
   "description": "See which tests failed on your current branch in GitHub Actions or CircleCI, right in your editor — click a failure to jump to the test. Works with Jest, Vitest, Playwright, and Detox.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "lidiakit",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -62,7 +62,7 @@
         "testRadar.circleci.jobName": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Name of the CircleCI job whose test results to show. Leave blank to use the most-recent finished job that reported test metadata."
+          "markdownDescription": "Pin results to a single CircleCI job by name. Leave blank to aggregate every test-bearing job in the run, grouped by job."
         }
       }
     },
