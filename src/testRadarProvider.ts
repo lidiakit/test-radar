@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { GitAPI } from "./git";
 import { WorkflowRun, parseOwnerRepo } from "./github";
 import { groupByFile, groupByJob, JunitReport, TestCaseResult } from "./junit";
-import { findTestLine } from "./stack";
+import { findTestFrame, repoRelativeFromCiPath } from "./stack";
 import {
   CiContext,
   CiProvider,
@@ -389,9 +389,12 @@ function failureRow(
   // Clicking the row opens the test's source file. Prefer an explicit `file`
   // attribute; fall back to `classname`, which is the file path for Vitest.
   const path = testCase.file ?? testCase.classname;
-  const uri = resolveTestUri(rootUri, path);
-  // Pin the exact failing line from the stack trace when we can find it.
-  const line = findTestLine(testCase.message, path);
+  // The stack frame gives us both the failing line and the real on-disk path —
+  // the latter carries any testDir prefix (e.g. "playwright/") the classname
+  // drops, which is what lets e2e tests resolve.
+  const frame = findTestFrame(testCase.message, path);
+  const uri = resolveTestUri(rootUri, path, frame?.path);
+  const line = frame?.line;
   item.description = line ? `${testCase.classname}:${line}` : testCase.classname;
   if (uri) {
     const args: unknown[] = [uri];
@@ -411,13 +414,23 @@ function failureRow(
   return item;
 }
 
-// Resolves a test's recorded path to an openable URI. Absolute paths (some
-// reporters emit them) are used as-is; repo-relative ones are joined onto the
-// repo root. Returns undefined when there's no usable path.
+// Resolves a test's recorded path to an openable URI. When the stack frame's
+// path sits under a known CI checkout root, that wins — stripped to a
+// repo-relative path it carries the testDir prefix the JUnit classname omits
+// (so e2e specs resolve). Otherwise: absolute classnames (some reporters emit
+// them) are used as-is, repo-relative ones are joined onto the repo root.
+// Returns undefined when there's no usable path.
 function resolveTestUri(
   rootUri: vscode.Uri,
   path: string,
+  framePath?: string,
 ): vscode.Uri | undefined {
+  if (framePath) {
+    const rel = repoRelativeFromCiPath(framePath);
+    if (rel) {
+      return vscode.Uri.joinPath(rootUri, rel);
+    }
+  }
   if (!path) {
     return undefined;
   }
