@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseJunitXml,
   groupByFile,
+  groupByJob,
   mergeReports,
   type JunitReport,
   type TestCaseResult,
@@ -233,5 +234,38 @@ describe("mergeReports", () => {
 
   it("returns an empty report for no inputs", () => {
     expect(mergeReports([])).toEqual({ total: 0, failures: 0, cases: [] });
+  });
+});
+
+describe("groupByJob", () => {
+  const inJob = (name: string, job?: string): TestCaseResult => ({
+    name,
+    classname: "src/x.test.ts",
+    status: "failed",
+    job,
+  });
+
+  it("groups by job, preserving job and case order", () => {
+    const groups = groupByJob([
+      inJob("a1", "unit"),
+      inJob("b1", "e2e"),
+      inJob("a2", "unit"),
+    ]);
+    expect(groups.map((g) => g.job)).toEqual(["unit", "e2e"]);
+    expect(groups[0].cases.map((c) => c.name)).toEqual(["a1", "a2"]);
+    expect(groups[1].cases.map((c) => c.name)).toEqual(["b1"]);
+  });
+
+  it("collapses untagged cases into a single undefined group", () => {
+    // GitHub / single-job CircleCI: no job tags → one group → callers render
+    // plainly by file rather than adding a spurious job level.
+    const groups = groupByJob([inJob("a"), inJob("b")]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].job).toBeUndefined();
+    expect(groups[0].cases).toHaveLength(2);
+  });
+
+  it("returns an empty array for no cases", () => {
+    expect(groupByJob([])).toEqual([]);
   });
 });

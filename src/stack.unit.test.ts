@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findTestLine } from "./stack";
+import { findTestLine, findTestFrame, repoRelativeFromCiPath } from "./stack";
 
 describe("findTestLine", () => {
   it("reads the line from a bare V8 frame (Vitest-style)", () => {
@@ -56,5 +56,86 @@ describe("findTestLine", () => {
 
   it("returns undefined when the file is empty", () => {
     expect(findTestLine("at /repo/src/math.test.ts:42:17", "")).toBeUndefined();
+  });
+});
+
+describe("findTestFrame", () => {
+  it("returns the full CI path plus line for an e2e frame whose classname drops the testDir", () => {
+    // CircleCI reports the e2e classname relative to the Playwright testDir
+    // ("Analytics/lcm.spec.ts"), but the stack frame has the real path including
+    // "playwright/". We capture the latter so the file can actually be opened.
+    const stack =
+      "    at /root/project/playwright/Analytics/lcm.spec.ts:11:15";
+    expect(findTestFrame(stack, "Analytics/lcm.spec.ts")).toEqual({
+      path: "/root/project/playwright/Analytics/lcm.spec.ts",
+      line: 11,
+    });
+  });
+
+  it("prefers the absolute frame over Playwright's relative header (testDir-dropped path)", () => {
+    // Real Playwright shape: a header with the testDir-relative path comes FIRST,
+    // then the absolute on-disk frame deeper in the stack. We want the line from
+    // the header but the absolute path (it carries the "playwright/" prefix the
+    // classname drops) so the file can actually be opened.
+    const classname = "__test-radar-verify__/__test-radar-verify__failingE2E.spec.ts";
+    const stack = [
+      `[Desktop Chrome] › ${classname}:11:7 › verify › intentional failure`,
+      "    Error: expect(received).toBe(expected)",
+      "    > 11 |     expect(1).toBe(2)",
+      `        at /root/project/playwright/${classname}:11:15`,
+    ].join("\n");
+    expect(findTestFrame(stack, classname)).toEqual({
+      path: `/root/project/playwright/${classname}`,
+      line: 11,
+    });
+  });
+
+  it("falls back to the relative path when there's no absolute frame", () => {
+    const classname = "Analytics/lcm.spec.ts";
+    const stack = `[Desktop Chrome] › ${classname}:42:5 › flow`;
+    expect(findTestFrame(stack, classname)).toEqual({
+      path: classname,
+      line: 42,
+    });
+  });
+
+  it("captures the path from a parenthesised frame", () => {
+    const stack =
+      "    at Object.<anonymous> (/Users/me/repo/src/math.test.ts:7:5)";
+    expect(findTestFrame(stack, "src/math.test.ts")).toEqual({
+      path: "/Users/me/repo/src/math.test.ts",
+      line: 7,
+    });
+  });
+
+  it("does not match a different file with the same suffix", () => {
+    const stack = "    at /repo/src/notmath.test.ts:12:3";
+    expect(findTestFrame(stack, "math.test.ts")).toBeUndefined();
+  });
+
+  it("returns undefined when no frame references the file", () => {
+    expect(
+      findTestFrame("    at /repo/src/other.test.ts:10:1", "src/math.test.ts"),
+    ).toBeUndefined();
+  });
+});
+
+describe("repoRelativeFromCiPath", () => {
+  it("strips the /root/project/ CircleCI Docker root", () => {
+    expect(
+      repoRelativeFromCiPath("/root/project/playwright/Analytics/lcm.spec.ts"),
+    ).toBe("playwright/Analytics/lcm.spec.ts");
+  });
+
+  it("strips the /home/circleci/project/ root", () => {
+    expect(
+      repoRelativeFromCiPath("/home/circleci/project/src/math.test.ts"),
+    ).toBe("src/math.test.ts");
+  });
+
+  it("returns undefined for a path outside a known CI root", () => {
+    expect(
+      repoRelativeFromCiPath("/Users/me/repo/src/math.test.ts"),
+    ).toBeUndefined();
   });
 });

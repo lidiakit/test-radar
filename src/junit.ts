@@ -59,6 +59,29 @@ export function groupByFile(cases: TestCaseResult[]): FileGroup[] {
   return [...groups].map(([file, cases]) => ({ file, cases }));
 }
 
+export interface JobGroup {
+  job: string | undefined;
+  cases: TestCaseResult[];
+}
+
+// Groups cases by the CI job that produced them (the `job` tag), preserving
+// first-seen order of both jobs and cases within each job. Pure; used to render
+// failures grouped by job when CircleCI results are aggregated across several.
+// Untagged cases (single-job CircleCI, or GitHub) collapse into one `undefined`
+// group, so callers see a single group and fall back to plain by-file rendering.
+export function groupByJob(cases: TestCaseResult[]): JobGroup[] {
+  const groups = new Map<string | undefined, TestCaseResult[]>();
+  for (const testCase of cases) {
+    const existing = groups.get(testCase.job);
+    if (existing) {
+      existing.push(testCase);
+    } else {
+      groups.set(testCase.job, [testCase]);
+    }
+  }
+  return [...groups].map(([job, cases]) => ({ job, cases }));
+}
+
 // fast-xml-parser turns attributes into "@_"-prefixed keys and leaves element
 // text under "#text". We keep attribute values as strings (no coercion) so test
 // names like "adds 1 + 1" aren't mangled, and let entities (&gt; etc.) decode.

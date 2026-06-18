@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import { GitAPI } from "./git";
 import { WorkflowRun, parseOwnerRepo } from "./github";
-import { groupByFile, JunitReport, TestCaseResult } from "./junit";
-import { findTestLine } from "./stack";
+import { groupByFile, groupByJob, JunitReport, TestCaseResult } from "./junit";
+import { findTestFrame, repoRelativeFromCiPath } from "./stack";
 import {
   CiContext,
   CiProvider,
@@ -171,6 +171,10 @@ export class TestRadarProvider
     if (element instanceof RunItem) {
       return runChildren(element.report, element.rootUri);
     }
+    if (element instanceof JobGroupItem) {
+      // Within a job, fall back to the same by-file-or-flat layout a run uses.
+      return failureRows(element.cases, element.rootUri);
+    }
     if (element instanceof FileGroupItem) {
       return element.cases.map((c) => failureRow(c, element.rootUri));
     }
@@ -281,9 +285,9 @@ function countSkipped(report: JunitReport): number {
 }
 
 // Children of a run row: the failing tests, or a hint when the report couldn't
-// be loaded. Failures in a single file are listed directly; when they span
-// several files, they're grouped under one collapsible row per file so a long
-// list stays scannable.
+// be loaded. When failures span several CircleCI jobs (aggregated results),
+// they're grouped under one collapsible row per job; within a job (or for a
+// single-job/GitHub report) they fall back to by-file grouping.
 function runChildren(report: ReportState, rootUri: vscode.Uri): vscode.TreeItem[] {
   if (report.kind === "ready") {
     if (report.report.total === 0) {
@@ -294,16 +298,30 @@ function runChildren(report: ReportState, rootUri: vscode.Uri): vscode.TreeItem[
       // The happy path — a clear, friendly confirmation rather than a bare row.
       return [passRow(report.report)];
     }
-    const groups = groupByFile(failures);
-    if (groups.length > 1) {
-      return groups.map((g) => new FileGroupItem(g.file, g.cases, rootUri));
+    const jobs = groupByJob(failures);
+    if (jobs.length > 1) {
+      return jobs.map((g) => new JobGroupItem(g.job, g.cases, rootUri));
     }
-    return failures.map((c) => failureRow(c, rootUri));
+    return failureRows(failures, rootUri);
   }
   if (report.kind === "unavailable") {
     return [labelRow(`Test results unavailable — ${report.reason}`, "warning")];
   }
   return [];
+}
+
+// Renders a flat set of failures: listed directly when they share a file, or
+// grouped under one collapsible row per file when they span several so a long
+// list stays scannable. Shared by a run (single job) and by each JobGroupItem.
+function failureRows(
+  failures: TestCaseResult[],
+  rootUri: vscode.Uri,
+): vscode.TreeItem[] {
+  const groups = groupByFile(failures);
+  if (groups.length > 1) {
+    return groups.map((g) => new FileGroupItem(g.file, g.cases, rootUri));
+  }
+  return failures.map((c) => failureRow(c, rootUri));
 }
 
 // Shown under a run where nothing failed: celebratory when everything ran green,
@@ -321,6 +339,22 @@ function passRow(report: JunitReport): vscode.TreeItem {
     new vscode.ThemeColor("testing.iconPassed"),
   );
   return item;
+}
+
+// A per-job grouping row shown when aggregated CircleCI failures span multiple
+// jobs. Expands to that job's failures (by file, or listed directly). `job` is
+// always set here — runChildren only builds these when groupByJob found more
+// than one named job — but it's typed optional to mirror the JobGroup shape.
+class JobGroupItem extends vscode.TreeItem {
+  constructor(
+    readonly job: string | undefined,
+    readonly cases: TestCaseResult[],
+    readonly rootUri: vscode.Uri,
+  ) {
+    super(job ?? "tests", vscode.TreeItemCollapsibleState.Expanded);
+    this.iconPath = new vscode.ThemeIcon("server-process");
+    this.description = `${cases.length} failed`;
+  }
 }
 
 // A per-file grouping row shown when failures span multiple files. Expands to
@@ -355,9 +389,12 @@ function failureRow(
   // Clicking the row opens the test's source file. Prefer an explicit `file`
   // attribute; fall back to `classname`, which is the file path for Vitest.
   const path = testCase.file ?? testCase.classname;
-  const uri = resolveTestUri(rootUri, path);
-  // Pin the exact failing line from the stack trace when we can find it.
-  const line = findTestLine(testCase.message, path);
+  // The stack frame gives us both the failing line and the real on-disk path —
+  // the latter carries any testDir prefix (e.g. "playwright/") the classname
+  // drops, which is what lets e2e tests resolve.
+  const frame = findTestFrame(testCase.message, path);
+  const uri = resolveTestUri(rootUri, path, frame?.path);
+  const line = frame?.line;
   item.description = line ? `${testCase.classname}:${line}` : testCase.classname;
   if (uri) {
     const args: unknown[] = [uri];
@@ -377,13 +414,23 @@ function failureRow(
   return item;
 }
 
-// Resolves a test's recorded path to an openable URI. Absolute paths (some
-// reporters emit them) are used as-is; repo-relative ones are joined onto the
-// repo root. Returns undefined when there's no usable path.
+// Resolves a test's recorded path to an openable URI. When the stack frame's
+// path sits under a known CI checkout root, that wins — stripped to a
+// repo-relative path it carries the testDir prefix the JUnit classname omits
+// (so e2e specs resolve). Otherwise: absolute classnames (some reporters emit
+// them) are used as-is, repo-relative ones are joined onto the repo root.
+// Returns undefined when there's no usable path.
 function resolveTestUri(
   rootUri: vscode.Uri,
   path: string,
+  framePath?: string,
 ): vscode.Uri | undefined {
+  if (framePath) {
+    const rel = repoRelativeFromCiPath(framePath);
+    if (rel) {
+      return vscode.Uri.joinPath(rootUri, rel);
+    }
+  }
   if (!path) {
     return undefined;
   }
