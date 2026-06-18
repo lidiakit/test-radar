@@ -168,6 +168,27 @@ describe("mapTestsToReport — result mapping", () => {
     ]);
     expect(report.cases[0].file).toBe("src/a.test.ts");
   });
+
+  it("tags every case with the job name when one is given", () => {
+    const report = mapTestsToReport(
+      [
+        { classname: "a", name: "p", result: "success" },
+        { classname: "a", name: "f", result: "failure" },
+      ],
+      "run_unit_tests",
+    );
+    expect(report.cases.map((c) => c.job)).toEqual([
+      "run_unit_tests",
+      "run_unit_tests",
+    ]);
+  });
+
+  it("leaves the job undefined when no name is given (single-job read)", () => {
+    const report = mapTestsToReport([
+      { classname: "a", name: "t", result: "success" },
+    ]);
+    expect(report.cases[0].job).toBeUndefined();
+  });
 });
 
 describe("parseProjectSlug", () => {
