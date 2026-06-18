@@ -39,15 +39,38 @@ export function findTestFrame(
   // after a "/") so "math.test.ts" can't match inside "notmath.test.ts".
   const haystack = stack.replace(/\\/g, "/");
   const needle = escapeRegExp(file.replace(/\\/g, "/"));
-  const match = haystack.match(
-    new RegExp(`(?:^|[\\s(])((?:[^\\s()]*\\/)?${needle}):(\\d+)`, "m"),
+  const re = new RegExp(
+    `(?:^|[\\s(])((?:[^\\s()]*\\/)?${needle}):(\\d+)`,
+    "gm",
   );
-  if (!match) {
-    return undefined;
+
+  // A Playwright message references the file twice: a leading header with the
+  // testDir-relative path ("…/foo.spec.ts:LINE") and, deeper in the stack, the
+  // absolute on-disk frame ("at /root/project/…/foo.spec.ts:LINE"). Take the
+  // LINE from the first reference (the header — where the test is declared), but
+  // prefer an ABSOLUTE path for `path`, since only that carries the full
+  // checkout path we can map back to the workspace.
+  let line: number | undefined;
+  let firstPath: string | undefined;
+  let absolutePath: string | undefined;
+  for (const match of haystack.matchAll(re)) {
+    const candidate = Number(match[2]);
+    if (!(candidate > 0)) {
+      continue;
+    }
+    if (line === undefined) {
+      line = candidate;
+      firstPath = match[1];
+    }
+    if (absolutePath === undefined && match[1].startsWith("/")) {
+      absolutePath = match[1];
+    }
   }
 
-  const line = Number(match[2]);
-  return line > 0 ? { path: match[1], line } : undefined;
+  if (line === undefined) {
+    return undefined;
+  }
+  return { path: absolutePath ?? firstPath!, line };
 }
 
 // Returns the 1-based line of the first stack frame referencing `file`, or

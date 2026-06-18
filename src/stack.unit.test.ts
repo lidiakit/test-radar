@@ -72,6 +72,33 @@ describe("findTestFrame", () => {
     });
   });
 
+  it("prefers the absolute frame over Playwright's relative header (testDir-dropped path)", () => {
+    // Real Playwright shape: a header with the testDir-relative path comes FIRST,
+    // then the absolute on-disk frame deeper in the stack. We want the line from
+    // the header but the absolute path (it carries the "playwright/" prefix the
+    // classname drops) so the file can actually be opened.
+    const classname = "__test-radar-verify__/__test-radar-verify__failingE2E.spec.ts";
+    const stack = [
+      `[Desktop Chrome] › ${classname}:11:7 › verify › intentional failure`,
+      "    Error: expect(received).toBe(expected)",
+      "    > 11 |     expect(1).toBe(2)",
+      `        at /root/project/playwright/${classname}:11:15`,
+    ].join("\n");
+    expect(findTestFrame(stack, classname)).toEqual({
+      path: `/root/project/playwright/${classname}`,
+      line: 11,
+    });
+  });
+
+  it("falls back to the relative path when there's no absolute frame", () => {
+    const classname = "Analytics/lcm.spec.ts";
+    const stack = `[Desktop Chrome] › ${classname}:42:5 › flow`;
+    expect(findTestFrame(stack, classname)).toEqual({
+      path: classname,
+      line: 42,
+    });
+  });
+
   it("captures the path from a parenthesised frame", () => {
     const stack =
       "    at Object.<anonymous> (/Users/me/repo/src/math.test.ts:7:5)";
