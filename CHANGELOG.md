@@ -4,6 +4,18 @@ All notable changes to the Test Radar extension are documented here.
 This project follows [Keep a Changelog](http://keepachangelog.com/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0]
+
+- **Aggregate across CircleCI jobs.** Test Radar now reads test results from *every*
+  test-bearing job in a workflow run — unit, component, and e2e together — instead of
+  a single job. Failures are grouped **by job → file → test**, so you can see which
+  job (and which device/config) a failure came from at a glance.
+- Pin to one job with `testRadar.circleci.jobName`; leave it blank to aggregate.
+- **Fix:** clicking a Playwright e2e failure now jumps to the correct file. Their
+  reported path is relative to the Playwright `testDir`, so Test Radar now recovers
+  the real path from the failure's stack frame (standard CircleCI checkout paths
+  `/root/project` and `/home/circleci/project`).
+
 ## [0.2.0]
 
 - **CircleCI support.** Test Radar now reads test results from CircleCI as well as
