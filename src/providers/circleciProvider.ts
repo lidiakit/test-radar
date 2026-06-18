@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { WorkflowRun } from "../github";
+import { JunitReport, mergeReports } from "../junit";
 import {
   resolveProjectSlug,
   fetchPipelines,
@@ -9,13 +10,14 @@ import {
   fetchTests,
   fetchArtifacts,
   downloadArtifactFile,
-  pickJob,
+  pickTestJobs,
   pickJunitArtifact,
   latestPipeline,
   mapWorkflowStatus,
   workflowHtmlUrl,
   mapTestsToReport,
   parseArtifactXml,
+  CircleJob,
   CircleWorkflow,
   JobInWorkflow,
 } from "../circleci";
@@ -124,13 +126,18 @@ export class CircleCiProvider implements CiProvider {
       }
     }
 
-    const picked = pickJob(
+    // Every finished test-bearing job, newest first. We aggregate results across
+    // all of them; a pinned jobName narrows this to the single named job.
+    const testJobs = pickTestJobs(
       tagged.map((t) => t.job),
       pinnedName,
     );
-    const owning = picked
-      ? tagged.find((t) => t.job === picked)!.workflow
-      : workflows[0];
+    // "The run" is the workflow that owns the newest test job (pickTestJobs sorts
+    // newest first); with no test job to anchor on, fall back to the first.
+    const owning =
+      testJobs.length > 0
+        ? tagged.find((t) => t.job === testJobs[0])!.workflow
+        : workflows[0];
 
     this.cache = {
       branch,
@@ -142,7 +149,7 @@ export class CircleCiProvider implements CiProvider {
     const report = await this.loadReport(
       slug,
       owning,
-      picked?.job_number,
+      testJobs,
       pinnedName,
       token,
     );
@@ -153,21 +160,21 @@ export class CircleCiProvider implements CiProvider {
     };
   }
 
-  // Loads the shown job's test metadata, falling back to a JUnit artifact when
-  // `/tests` is empty (>250MB of results, or store_test_results not configured).
-  // NeedsAuthError propagates (re-prompt); other problems become `unavailable`
-  // so they don't hide the run.
+  // Aggregates test metadata across every test-bearing job in the run, merging
+  // each job's report (tagged with its job name) into one. NeedsAuthError
+  // propagates (re-prompt); a single job that fails or has no data is skipped
+  // rather than sinking the whole run.
   private async loadReport(
     slug: string,
     workflow: CircleWorkflow,
-    jobNumber: number | undefined,
+    testJobs: CircleJob[],
     pinnedName: string | undefined,
     token: string,
   ): Promise<CiReportResult> {
     if (mapWorkflowStatus(workflow.status).status !== "completed") {
       return { kind: "none" };
     }
-    if (jobNumber === undefined) {
+    if (testJobs.length === 0) {
       return {
         kind: "unavailable",
         reason: pinnedName
@@ -175,30 +182,64 @@ export class CircleCiProvider implements CiProvider {
           : "No test metadata; set testRadar.circleci.jobName",
       };
     }
-    try {
-      const tests = await fetchTests(slug, jobNumber, token);
-      if (tests.length > 0) {
-        return { kind: "ready", report: mapTestsToReport(tests) };
+
+    const reports: JunitReport[] = [];
+    let lastError: string | undefined;
+    for (const job of testJobs) {
+      try {
+        const report = await this.loadJobReport(slug, job, token);
+        if (report) {
+          reports.push(report);
+        }
+      } catch (err) {
+        // A re-prompt has to win over a silent skip; any other failure just
+        // drops this one job so it can't sink the whole aggregate.
+        if (err instanceof NeedsAuthError) {
+          throw err;
+        }
+        lastError = err instanceof Error ? err.message : String(err);
       }
-      // Empty /tests — try the raw JUnit artifact instead.
-      const junit = pickJunitArtifact(await fetchArtifacts(slug, jobNumber, token));
-      if (!junit) {
-        return {
-          kind: "unavailable",
-          reason: "No test metadata; set testRadar.circleci.jobName",
-        };
-      }
-      const xml = await downloadArtifactFile(junit.url, token);
-      return { kind: "ready", report: parseArtifactXml(xml) };
-    } catch (err) {
-      if (err instanceof NeedsAuthError) {
-        throw err;
-      }
+    }
+
+    const merged = mergeReports(reports);
+    if (merged.total === 0) {
+      // Nothing usable from any job: no store_test_results anywhere, or every
+      // job's fetch failed. Surface the last real error when we have one so the
+      // single-job case keeps its old diagnostic, else the generic hint.
       return {
         kind: "unavailable",
-        reason: err instanceof Error ? err.message : String(err),
+        reason: lastError ?? "No test metadata; set testRadar.circleci.jobName",
       };
     }
+    return { kind: "ready", report: merged };
+  }
+
+  // One job's test metadata, tagged with its job name, falling back to a JUnit
+  // artifact when `/tests` is empty (>250MB of results, or store_test_results
+  // not configured). Returns null when the job simply has no test data; throws
+  // on a fetch failure so the caller can record it (and re-prompt on auth).
+  private async loadJobReport(
+    slug: string,
+    job: CircleJob,
+    token: string,
+  ): Promise<JunitReport | null> {
+    const jobNumber = job.job_number;
+    if (jobNumber === undefined) {
+      return null; // pickTestJobs filters these out, but be defensive.
+    }
+    const tests = await fetchTests(slug, jobNumber, token);
+    if (tests.length > 0) {
+      return mapTestsToReport(tests, job.name);
+    }
+    // Empty /tests — try the raw JUnit artifact instead.
+    const junit = pickJunitArtifact(
+      await fetchArtifacts(slug, jobNumber, token),
+    );
+    if (!junit) {
+      return null;
+    }
+    const xml = await downloadArtifactFile(junit.url, token);
+    return parseArtifactXml(xml, job.name);
   }
 
   private toRun(

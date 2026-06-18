@@ -474,6 +474,15 @@ function isCircleHost(url: string): boolean {
 
 // Parses a downloaded JUnit XML artifact directly (CircleCI artifacts are raw
 // files, NOT zipped — so this does NOT reuse github's extractJunitXml).
-export function parseArtifactXml(xml: string): JunitReport {
-  return parseJunitXml(xml);
+// `jobName` tags every case with its job (as `mapTestsToReport` does) so the
+// artifact-fallback path aggregates by job like the `/tests` path.
+export function parseArtifactXml(xml: string, jobName?: string): JunitReport {
+  const report = parseJunitXml(xml);
+  if (!jobName) {
+    return report;
+  }
+  return {
+    ...report,
+    cases: report.cases.map((c) => ({ ...c, job: jobName })),
+  };
 }
