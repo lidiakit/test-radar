@@ -3,6 +3,7 @@ import {
   parseProjectSlug,
   resolveProjectSlug,
   mapTestsToReport,
+  parseArtifactXml,
   mapWorkflowStatus,
   pickJob,
   pickTestJobs,
@@ -189,6 +190,28 @@ describe("mapTestsToReport — result mapping", () => {
       { classname: "a", name: "t", result: "success" },
     ]);
     expect(report.cases[0].job).toBeUndefined();
+  });
+});
+
+describe("parseArtifactXml", () => {
+  const xml = `<testsuites><testsuite name="s">
+      <testcase classname="src/a.test.ts" name="passes"/>
+      <testcase classname="src/a.test.ts" name="fails"><failure message="boom"/></testcase>
+    </testsuite></testsuites>`;
+
+  it("tags every case with the job name when one is given", () => {
+    const report = parseArtifactXml(xml, "run_unit_tests");
+    expect(report.cases.map((c) => c.job)).toEqual([
+      "run_unit_tests",
+      "run_unit_tests",
+    ]);
+    // Parsing itself is unaffected.
+    expect(report.total).toBe(2);
+    expect(report.failures).toBe(1);
+  });
+
+  it("leaves the job undefined when no name is given", () => {
+    expect(parseArtifactXml(xml).cases[0].job).toBeUndefined();
   });
 });
 
